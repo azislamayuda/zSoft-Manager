@@ -1,0 +1,194 @@
+/* zSoft Manager 0.3.0 — soft-blue, modern flat GTK4. No remote UI assets. */
+window { background: #f6f9fd; color: #283b55; }
+.app-root { background: #f6f9fd; }
+.hero {
+  padding: 7px 2px 20px 2px;
+  border-bottom: 1px solid #dce7f4;
+  margin-bottom: 18px;
+}
+.headline { color: #1f4e81; font-size: 25px; font-weight: 750; }
+.subline { color: #7187a1; font-size: 12px; }
+.navigation { padding: 2px; }
+button.nav-icon-button {
+  background: #edf4fc;
+  border: 1px solid #dbe7f4;
+  border-radius: 11px;
+  box-shadow: none;
+  min-width: 42px;
+  min-height: 42px;
+  padding: 7px;
+  color: #53779f;
+}
+button.nav-icon-button:hover { background: #dfedfd; color: #245c98; }
+button.nav-icon-button.nav-active {
+  background: #d8eafd;
+  border-color: #bdd7f5;
+  color: #2362a7;
+}
+.page { background: transparent; padding-top: 3px; }
+.action-bar { margin-bottom: 1px; }
+button {
+  min-height: 34px;
+  padding: 5px 13px;
+  border-radius: 9px;
+  font-weight: 560;
+  box-shadow: none;
+}
+button.flat-button,
+button.back-button,
+button.subtle-button {
+  color: #557493;
+  background: #ffffff;
+  border: 1px solid #dee8f3;
+  box-shadow: none;
+}
+button.flat-button:hover,
+button.back-button:hover,
+button.subtle-button:hover { background: #edf5ff; color: #2b5f97; }
+button.soft-button {
+  color: #2b6aa9;
+  background: #e7f1ff;
+  border: 1px solid #d2e4f9;
+  box-shadow: none;
+}
+button.soft-button:hover { background: #dcecff; }
+button.primary-button {
+  color: #ffffff;
+  background: #4d8fd2;
+  border: 1px solid #4d8fd2;
+  box-shadow: none;
+}
+button.primary-button:hover { background: #367abd; border-color: #367abd; }
+button:disabled { opacity: .50; }
+.count-label { color: #67819c; font-size: 12px; font-weight: 600; margin: 3px 1px 1px 1px; }
+.app-list { background: transparent; }
+.app-row {
+  background: #ffffff;
+  border: 1px solid #e3eaf3;
+  border-radius: 11px;
+  margin: 0 1px 8px 1px;
+}
+.app-row:hover { background: #fbfdff; border-color: #d2e2f2; }
+.file-title { color: #244e7c; font-size: 13px; font-weight: 700; }
+.pathline { color: #8495a9; font-size: 11px; }
+.status-text { color: #397bb2; font-size: 12px; }
+.footer-row { padding-top: 12px; margin-top: 11px; border-top: 1px solid #dce7f4; }
+.footer { color: #71869c; font-size: 11px; }
+.version-chip { color: #5277a0; font-size: 12px; font-weight: 700; }
+button.github-link {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 3px 6px;
+  min-height: 27px;
+  font-weight: 600;
+  color: #316a9f;
+}
+button.github-link:hover { color: #235583; background: #e9f3ff; }
+.page-heading { color: #214f83; font-size: 22px; font-weight: 750; }
+.page-header { padding: 2px 4px 4px; }
+.content-card {
+  background: #ffffff;
+  border: 1px solid #e1eaf4;
+  border-radius: 13px;
+  padding: 26px;
+  margin: 2px 2px 12px;
+}
+.body-copy { color: #617c98; font-size: 13px; }
+.detail-list { border-top: 1px solid #e8eef6; margin-top: 5px; }
+.detail-row { border-bottom: 1px solid #edf1f7; padding: 11px 0; }
+.detail-key { color: #7b91a6; font-size: 12px; font-weight: 600; }
+.detail-value { color: #2d506f; font-size: 12px; }
+.changelog-scroll {
+  background: #ffffff;
+  border: 1px solid #e1eaf4;
+  border-radius: 13px;
+  margin: 1px 2px 4px;
+}
+textview.changelog-text, textview.changelog-text text {
+  background: #ffffff;
+  color: #354e67;
+  font-family: monospace;
+  font-size: 12px;
+}
+.error-text { color: #b94959; }
+
+/* Embedded source/rename sheets: one native GTK4 window, no dock duplication. */
+.modal-backdrop { background-color: rgba(25, 44, 65, 0.40); }
+.modal-card {
+  background-color: #f9fbff;
+  border: 1px solid #cfdded;
+  border-radius: 16px;
+  box-shadow: 0 14px 38px rgba(20, 47, 79, 0.22);
+}
+.modal-heading-row {
+  padding: 18px 24px;
+  border-bottom: 1px solid #e2eaf5;
+}
+.modal-title { color: #234b75; font-size: 16px; font-weight: 750; }
+button.modal-close {
+  background: #eef4fb;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  min-width: 34px;
+  min-height: 34px;
+  padding: 6px;
+  color: #617a95;
+}
+button.modal-close:hover { background: #e0edfc; color: #2f679c; }
+.modal-form { padding: 22px 24px 18px 24px; }
+.modal-folder { color: #35658e; font-size: 13px; font-weight: 700; }
+.modal-description { color: #58728c; font-size: 13px; }
+.form-label { color: #3d5670; font-size: 12px; font-weight: 600; }
+entry.form-input {
+  color: #29445f;
+  background: #ffffff;
+  border: 1px solid #cfdceb;
+  border-radius: 9px;
+  box-shadow: none;
+  min-height: 39px;
+  padding: 7px 10px;
+}
+entry.form-input:focus-within {
+  border-color: #7dabd9;
+  outline: 2px solid rgba(87, 145, 204, 0.16);
+  outline-offset: 0;
+}
+.modal-actions {
+  padding: 18px 24px 22px 24px;
+  border-top: 1px solid #e2eaf5;
+}
+button.modal-action {
+  min-height: 39px;
+  min-width: 98px;
+  padding: 7px 16px;
+  border-radius: 9px;
+  box-shadow: none;
+}
+.error-text { color: #b74657; font-size: 12px; }
+
+/* Native GTK4 provider picker, same restrained flat treatment as input fields. */
+combobox.form-input > box > button {
+  background: #ffffff;
+  color: #29445f;
+  border: 1px solid #cfdceb;
+  border-radius: 9px;
+  min-height: 39px;
+  box-shadow: none;
+  padding: 7px 11px;
+}
+combobox.form-input > box > button:hover { background: #f1f7ff; border-color: #abc9e8; }
+
+/* In-window, transient notifications: no extra window or idle polling. */
+revealer.toast-success .toast { background: #e5f5eb; border-color: #addac1; color: #246247; }
+revealer.toast-info .toast { background: #e9f3ff; border-color: #b7d7f8; color: #245d94; }
+revealer.toast-error .toast { background: #fff1ef; border-color: #f5c9c3; color: #9b4039; }
+.toast {
+  background: #e9f3ff;
+  border: 1px solid #b7d7f8;
+  border-radius: 12px;
+  padding: 13px 18px;
+  box-shadow: 0 4px 18px rgba(31, 68, 108, 0.12);
+  font-weight: 600;
+  color: #245d94;
+}

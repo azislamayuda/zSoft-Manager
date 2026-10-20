@@ -1,0 +1,150 @@
+# Changelog
+
+All notable changes to this project are recorded here. Format follows Keep a Changelog.
+
+## [0.3.0] - 2026-10-21
+
+### Added
+
+- Rebranded the application and Rust package as **zSoft Manager**, retaining current AppImage management functionality.
+- In-window transient toast notifications for Source Save, scanning, rename, rollback, update, error states, and self-update.
+- Header Update icon next to Changelog: manual GitHub Release check followed by explicit installation on the second click for supported AppImage installations.
+- New AppImage packaging script, desktop metadata, icon, and tag-triggered GitHub Actions release workflow.
+- Safe migration script importing original local Git history into the already-cloned GitHub worktree.
+- README for GitHub and personal-use, non-commercial source-available LICENSE.
+
+### Changed
+
+- New application ID, executable name, desktop entry, and version: `zsoft-manager` 0.3.0.
+- Config and state write to `zsoft-manager` XDG directories; legacy zAppImage Manager data remains readable for migration.
+- The old rollback backup suffix stays compatible with previously saved backup files.
+
+### Limitations
+
+- AppImage binary must be built on Ubuntu or a GitHub Actions runner; this source bundle itself is not a compiled AppImage.
+- Self-update requires a published GitHub Release and installation inside a `~/Applications` subfolder.
+- The new noncommercial source-available license does not retroactively remove prior MIT grants.
+
+
+
+## [0.2.4] - 2026-10-21
+
+### Added
+
+- Official KDE Kdenlive stable AppImage source, with automatic discovery for Kdenlive executables inside managed subfolders.
+- Dynamic KDE release-series discovery (not hardcoded to 26.08) and latest x86_64 stable asset selection.
+- KDE provider selector in the existing in-window Source sheet; no GitHub repository necessary for Kdenlive.
+- Strict HTTPS-only KDE listing and asset download paths, exact remote size requirement, local ELF validation, and fallback errors if a mirror does not publish file length.
+- Unit tests for KDE HTML discovery and filtering, asset version ordering, HTTP header length parsing, built-in source selection, and JSON compatibility.
+
+### Changed
+
+- Per-app action order is **Source, Stable name, Install update, Rollback**; Update and Rollback positions are swapped.
+- Version bumped to 0.2.4. All interface labels remain in English; stable filename, backup, and rollback behaviors are unchanged.
+
+### Security notes
+
+- Only official stable `kdenlive-<version>-x86_64.AppImage` names are accepted from KDE directory listings. Mirrors must be HTTPS.
+- No GPG signature verification is implemented. A missing KDE asset checksum is not treated as a verified SHA256.
+- If KDE HEAD lacks a reliable `Content-Length`, the update is not offered rather than bypassing size verification.
+
+## [0.2.3] - 2026-10-21
+
+### Changed
+
+- Replaced the GitHub Source popup with a native in-window GTK4 overlay sheet. It no longer creates a separate window or a second Ubuntu Dock indicator.
+- Applied the same in-window treatment to the Stable name rename confirmation.
+- Redesigned **Cancel**, **Save**, and **Rename** actions with left-hand icons, modern flat soft-blue styling, consistent button sizes, and generous padding on every edge.
+- Added a close icon, keyboard Escape dismissal, comfortable form field spacing, and inline validation messages.
+- Reused the existing GTK4 dependency; no extra runtime or background service.
+
+### Tests
+
+- Added source validation tests for valid mappings, invalid repository names, unsafe stable names, and installed filename mismatch.
+
+### Preserved
+
+- Update source JSON format, scanner exclusions, stable filenames, updates, backup, and rollback.
+
+## [0.2.2] - 2026-10-21
+
+### Added
+
+- Three in-window pages using `GtkStack`: Applications, About, and Changelog, with a lightweight crossfade transition.
+- Two compact, adjacent icon-only header navigation buttons with tooltips, active-page states, and in-page navigation back to Applications.
+- Meaningful icons before labels on the three main actions (Rescan, Check updates, Update all) and the per-app action buttons.
+- Flat, modern soft-blue styling with restrained borders, generous spacing, and accessible text labels for main actions.
+- Unit tests for the page identifiers and English labels on main actions.
+
+### Changed
+
+- Translated all visible GUI controls, tooltips, progress messages, confirmation dialogs, and error notices into English.
+- About and Changelog are now full pages inside the existing main window, rather than separate popup dialogs/windows.
+- Changelog history and README now use English UI terminology.
+- Footer GitHub link and automatic version display remain visible across all three pages.
+- Updated Cargo version to `0.2.2` without adding dependencies, a web engine, or idle-time network requests.
+
+### Preserved
+
+- Existing scanning exclusions, GitHub release checks, manual updates, stable naming, backup, and rollback behavior.
+
+## [0.2.1] - 2026-10-21
+
+### Added
+
+- Compact footer on the bottom right with the version read from `Cargo.toml` and an embedded GitHub icon linking to `https://github.com/azislamayuda`.
+- Header **Menu** with **About** (native GTK4 About dialog) and **Changelog** (scrollable changelog window).
+- Changelog content and GitHub icon are embedded in the binary at compile time; both features work offline without runtime asset paths or additional dependencies.
+- Tests for version metadata, verified GitHub profile constant, embedded changelog, and icon asset.
+
+### Changed
+
+- Bumped version to `0.2.1`. Existing AppImage scanning, stable naming, updates, and rollback are unchanged.
+
+## [0.2.0] - 2026-10-21
+
+### Added
+
+- **Stable versionless AppImage names**: a downloaded release replaces `<AppName>.AppImage`, not a version-bearing filename.
+- **Stable name** button: manually migrate an installed AppImage to a versionless name without downloading it again, with a confirmation dialog.
+- Editable stable filename in the **Source** dialog; source mappings remain valid after a versioned-to-stable migration.
+- Relative compatibility symlink at the previous filename so older launchers continue to work; the scanner deliberately ignores symlinks.
+- Best-effort updates of user-owned `Exec=` and `TryExec=` desktop entries in `~/.local/share/applications`.
+- Previous installed version tracking (`previous_tags`) so rollback maintains accurate comparison when known.
+- Unit tests for filename inference, invalid names, existing-file collision, rename without byte changes, versionless install and rollback, backup rotation, and backward-compatible configuration.
+
+### Changed
+
+- Backups for migrated apps are now located at `.<stable filename>.zappimage-manager.backup`.
+- GUI rescans the folder after finished installations to show the new stable filename immediately.
+- Version bumped to `0.2.0`; uses the existing size-optimized Rust/GTK4 build configuration.
+
+### Safety
+
+- Aborts migration when the stable target already exists, including a broken symlink.
+- Prevents manual update/rename/rollback for files outside `~/Applications` subfolders or inside `ArtCraft`.
+- Creates a backup before replacing any AppImage; restores the original when the initial rename/install fails.
+- Never deletes an original file during failed download or checksum verification.
+- Compatibility symlinks are not followed by the AppImage scanner.
+
+### Limitations
+
+- Rename inference is heuristic. Edit the desired filename in the **Stable name** confirmation dialog, and configure it in **Source** for subsequent updates.
+- `.desktop` repair covers files immediately inside `~/.local/share/applications` only; other launchers rely on the legacy compatibility symlink.
+- Only one prior AppImage update is kept for rollback; no guarantee against abrupt power loss during the two-step rename or filesystem corruption.
+- GitHub Releases only; manual normalization works without a configured GitHub source.
+- Build and tests require a system with Rust and GTK4 development headers.
+
+## [0.1.0] - 2026-10-21
+
+### Added
+
+- Native Rust/GTK4 application with a soft-blue GUI.
+- Recursive scan of `.AppImage` files only inside `~/Applications` subfolders, excluding `ArtCraft` and symlinks.
+- Per-application GitHub release configuration, version checks, size and optional SHA256 verification.
+- User-invoked downloads, updates, one-generation backups and rollback.
+- Lightweight Cargo release profile, README, `.gitignore`, local Git and unit tests.
+
+### Fixed
+
+- Fix Rust compiler error `E0716` in `src/ui.rs` by storing the formatted GTK status text in an owned `String`.

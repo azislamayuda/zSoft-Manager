@@ -1,0 +1,30 @@
+zSoft Manager Personal Use Source License 1.0
+Copyright (c) 2026 Azis Lamayuda
+
+Permission is granted to any individual to view, download, use, copy, and
+modify the source code and compiled software solely for their own personal,
+non-commercial purposes, provided that this notice is preserved in copies or
+substantial portions.
+
+You may share the unmodified source or your modified source with others free
+of charge under this same license, provided that you retain this copyright
+notice, the license text, and a clear notice of your modifications.
+
+No permission is granted to sell, rent, license for a fee, monetize, or otherwise
+commercially exploit the software, any compiled builds, or modified versions.
+Commercial redistribution, bundling into paid products or services, and
+commercial hosting are not authorized without separate written permission
+from the copyright holder.
+
+Third-party dependencies remain licensed under their own respective terms.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE, AND NONINFRINGEMENT. IN NO EVENT SHALL THE COPYRIGHT
+HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY ARISING FROM
+THE SOFTWARE OR ITS USE.
+
+NOTE: This is a source-available, non-commercial license and is NOT an
+Open Source Initiative (OSI) approved open-source license. Earlier zAppImage
+Manager versions published under MIT remain subject to their original MIT
+license; this text does not retroactively revoke previously granted rights.

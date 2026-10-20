@@ -1,0 +1,20 @@
+[package]
+name = "zsoft-manager"
+version = "0.3.0"
+edition = "2021"
+rust-version = "1.83"
+description = "Lightweight native software and AppImage manager for Ubuntu"
+license-file = "LICENSE"
+
+[dependencies]
+gtk = { package = "gtk4", version = "0.11.5", default-features = false, features = ["v4_6"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
+incremental = false

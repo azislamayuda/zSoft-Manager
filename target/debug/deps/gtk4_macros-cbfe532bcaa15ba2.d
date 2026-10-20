@@ -1,0 +1,9 @@
+/home/lamayuda/ZDATA/ME/GITHUB/zSoft-Manager/target/debug/deps/gtk4_macros-cbfe532bcaa15ba2.d: /home/lamayuda/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gtk4-macros-0.11.5/src/lib.rs /home/lamayuda/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gtk4-macros-0.11.5/src/attribute_parser.rs /home/lamayuda/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gtk4-macros-0.11.5/src/composite_template_derive.rs /home/lamayuda/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gtk4-macros-0.11.5/src/template_callbacks_attribute.rs /home/lamayuda/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gtk4-macros-0.11.5/src/util.rs
+
+/home/lamayuda/ZDATA/ME/GITHUB/zSoft-Manager/target/debug/deps/libgtk4_macros-cbfe532bcaa15ba2.so: /home/lamayuda/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gtk4-macros-0.11.5/src/lib.rs /home/lamayuda/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gtk4-macros-0.11.5/src/attribute_parser.rs /home/lamayuda/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gtk4-macros-0.11.5/src/composite_template_derive.rs /home/lamayuda/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gtk4-macros-0.11.5/src/template_callbacks_attribute.rs /home/lamayuda/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gtk4-macros-0.11.5/src/util.rs
+
+/home/lamayuda/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gtk4-macros-0.11.5/src/lib.rs:
+/home/lamayuda/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gtk4-macros-0.11.5/src/attribute_parser.rs:
+/home/lamayuda/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gtk4-macros-0.11.5/src/composite_template_derive.rs:
+/home/lamayuda/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gtk4-macros-0.11.5/src/template_callbacks_attribute.rs:
+/home/lamayuda/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gtk4-macros-0.11.5/src/util.rs:

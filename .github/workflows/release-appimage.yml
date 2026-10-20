@@ -1,0 +1,38 @@
+name: Build and publish AppImage
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build-appimage:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Ubuntu build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config libgtk-4-dev curl file
+      - name: Install Rust stable
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      - name: Test
+        run: cargo test
+      - name: Build optimized binary
+        run: cargo build --release
+      - name: Build portable AppImage
+        run: bash scripts/build-appimage.sh
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: zSoft-Manager-x86_64
+          path: dist/*
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: dist/*

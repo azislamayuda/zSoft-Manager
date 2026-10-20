@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=zSoft Manager
+GenericName=AppImage Manager
+Comment=Native Rust/GTK4 software update manager
+Exec=zsoft-manager
+Icon=zsoft-manager
+Terminal=false
+Categories=Utility;System;
+StartupWMClass=io.github.azislamayuda.zsoft-manager
+StartupNotify=true
