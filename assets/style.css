@@ -1,4 +1,4 @@
-/* zSoft Manager 0.4.0 — soft-blue, modern flat GTK4. No remote UI assets. */
+/* zSoft Manager 0.4.1 — soft-blue, modern flat GTK4. No remote UI assets. */
 window { background: #f6f9fd; color: #283b55; }
 .app-root { background: #f6f9fd; }
 .hero {
@@ -228,3 +228,19 @@ headerbar.compact-titlebar windowcontrols button {
 .node-version { color: #3b6387; font-size: 12px; font-weight: 600; }
 .node-latest { color: #5084ae; font-size: 12px; }
 .node-status { color: #617d99; font-size: 12px; padding: 7px 2px; }
+
+/* v0.4.1: Python venv management, same compact soft-blue flat treatment. */
+.python-config {
+  background: #f0f7ff;
+  border: 1px solid #dce9f8;
+  border-radius: 12px;
+  padding: 14px 17px;
+}
+.python-config entry.form-input {
+  min-height: 36px;
+  font-family: monospace;
+  font-size: 12px;
+}
+.python-config .pathline {
+  color: #617f9f;
+}

@@ -10,5 +10,6 @@ cargo fmt --check
 cargo test
 cargo build --release
 bash scripts/build-appimage.sh
-(cd dist && sha256sum -c "zSoft-Manager-v0.4.0-x86_64.AppImage.sha256")
+version="$(sed -n '/^version *=/{s/.*= *"\([^" ]*\)".*/\1/p;q;}' Cargo.toml)"
+(cd dist && sha256sum -c "zSoft-Manager-v${version}-x86_64.AppImage.sha256")
 printf '\nBuild complete. Test the AppImage in dist/ before uploading it to GitHub Releases.\n'

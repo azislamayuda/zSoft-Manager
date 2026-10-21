@@ -1,6 +1,6 @@
 use crate::{
     config::{self, Source, SourceProvider},
-    info, naming, node_ui, scan, self_update,
+    info, naming, node_ui, python_ui, scan, self_update,
     update::{self, CheckState, ReleaseInfo},
 };
 use gtk::{gdk, glib, prelude::*};
@@ -57,6 +57,7 @@ enum Event {
 enum Page {
     Applications,
     Node,
+    Python,
     About,
     Changelog,
 }
@@ -66,6 +67,7 @@ impl Page {
         match self {
             Self::Applications => "applications",
             Self::Node => "node",
+            Self::Python => "python",
             Self::About => "about",
             Self::Changelog => "changelog",
         }
@@ -117,6 +119,20 @@ fn node_icon_button() -> gtk::Button {
     button
 }
 
+fn python_icon_button() -> gtk::Button {
+    let button = gtk::Button::new();
+    button.add_css_class("nav-icon-button");
+    button.set_tooltip_text(Some("Python environments / pip"));
+    let bytes = glib::Bytes::from_static(include_bytes!("../assets/python-mark.png"));
+    let image = match gdk::Texture::from_bytes(&bytes) {
+        Ok(texture) => gtk::Image::from_paintable(Some(&texture)),
+        Err(_) => gtk::Image::from_icon_name("applications-development-symbolic"),
+    };
+    image.set_pixel_size(22);
+    button.set_child(Some(&image));
+    button
+}
+
 fn icon_only_button(icon_name: &str, tooltip: &str) -> gtk::Button {
     let button = gtk::Button::new();
     button.add_css_class("nav-icon-button");
@@ -132,6 +148,7 @@ struct Navigation {
     stack: gtk::Stack,
     appimage: gtk::Button,
     node: gtk::Button,
+    python: gtk::Button,
     about: gtk::Button,
     changelog: gtk::Button,
 }
@@ -141,6 +158,7 @@ fn navigate(nav: &Navigation, page: Page) {
     for (button, destination) in [
         (&nav.appimage, Page::Applications),
         (&nav.node, Page::Node),
+        (&nav.python, Page::Python),
         (&nav.about, Page::About),
         (&nav.changelog, Page::Changelog),
     ] {
@@ -241,10 +259,12 @@ fn build_ui(app: &gtk::Application) {
     navigation.add_css_class("navigation");
     let appimage_nav = icon_only_button("application-x-executable-symbolic", "AppImage Manager");
     let node_nav = node_icon_button();
+    let python_nav = python_icon_button();
     let about_nav = icon_only_button("help-about-symbolic", "About");
     let changelog_nav = icon_only_button("document-open-recent-symbolic", "Changelog");
     navigation.append(&appimage_nav);
     navigation.append(&node_nav);
+    navigation.append(&python_nav);
     navigation.append(&about_nav);
     navigation.append(&changelog_nav);
     let self_button = icon_only_button(
@@ -304,6 +324,10 @@ fn build_ui(app: &gtk::Application) {
     // NODE PAGE: native Rust backend + NVM-managed updates, no background daemon.
     let node_page = node_ui::build();
     stack.add_named(&node_page, Some(Page::Node.id()));
+
+    // PYTHON PAGE: manage one explicit virtual environment; no global pip changes.
+    let python_page = python_ui::build();
+    stack.add_named(&python_page, Some(Page::Python.id()));
 
     // ABOUT PAGE: full in-window page, not a dialog or popover.
     let about_page = gtk::Box::new(gtk::Orientation::Vertical, 16);
@@ -398,6 +422,7 @@ fn build_ui(app: &gtk::Application) {
         stack: stack.clone(),
         appimage: appimage_nav.clone(),
         node: node_nav.clone(),
+        python: python_nav.clone(),
         about: about_nav.clone(),
         changelog: changelog_nav.clone(),
     };
@@ -478,6 +503,7 @@ fn build_ui(app: &gtk::Application) {
     for (page, button) in [
         (Page::Applications, appimage_nav.clone()),
         (Page::Node, node_nav.clone()),
+        (Page::Python, python_nav.clone()),
         (Page::About, about_nav.clone()),
         (Page::Changelog, changelog_nav.clone()),
     ] {
@@ -1555,13 +1581,18 @@ mod ui_tests {
         let ids = [
             Page::Applications.id(),
             Page::Node.id(),
+            Page::Python.id(),
             Page::About.id(),
             Page::Changelog.id(),
         ];
-        assert_eq!(ids, ["applications", "node", "about", "changelog"]);
+        assert_eq!(
+            ids,
+            ["applications", "node", "python", "about", "changelog"]
+        );
         assert_ne!(ids[0], ids[1]);
         assert_ne!(ids[1], ids[2]);
         assert_ne!(ids[2], ids[3]);
+        assert_ne!(ids[3], ids[4]);
     }
 
     #[test]

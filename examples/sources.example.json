@@ -1,0 +1,28 @@
+{
+  "sources": [
+    {
+      "directory": "drawio",
+      "provider": "github",
+      "repository": "jgraph/drawio-desktop",
+      "installed_pattern": "*.AppImage",
+      "asset_pattern": "*x86_64*.AppImage",
+      "stable_filename": "drawio.AppImage"
+    },
+    {
+      "directory": "Kdenlive",
+      "provider": "kde_kdenlive",
+      "repository": "",
+      "installed_pattern": "kdenlive*.AppImage",
+      "asset_pattern": "kdenlive-*-x86_64.AppImage",
+      "stable_filename": "kdenlive.AppImage"
+    },
+    {
+      "directory": "GitHub Copilot",
+      "provider": "github",
+      "repository": "github/app",
+      "installed_pattern": "*Copilot*.AppImage",
+      "asset_pattern": "GitHub-Copilot-linux-x64.AppImage",
+      "stable_filename": "GitHub Copilot.AppImage"
+    }
+  ]
+}

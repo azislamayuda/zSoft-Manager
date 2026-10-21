@@ -3,6 +3,8 @@ mod info;
 mod naming;
 mod node;
 mod node_ui;
+mod python_env;
+mod python_ui;
 mod scan;
 mod self_update;
 mod ui;

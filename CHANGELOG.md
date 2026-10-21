@@ -2,6 +2,31 @@
 
 All notable changes to this project are recorded here. Format follows Keep a Changelog.
 
+## [0.4.1] - 2026-10-21
+
+### Added
+
+- Python Environment page beside Node.js with a configurable `~/myenv` (or absolute-path) virtual environment.
+- Session-scoped Activate/Deactivate button; only zSoft Manager subprocesses use the environment, not external terminals.
+- Local Python, pip and top-level package inventory; on-demand `pip list --outdated --not-required --format=json`.
+- Selectable outdated top-level packages and explicit Update selected; uses the venv's interpreter and runs `pip check` afterward.
+- JSON preferences for the selected virtualenv path at `~/.config/zsoft-manager/python.json`.
+- Offline Rust tests for path validation, pip JSON parsing, package-name validation and missing environment safety.
+- Example GitHub Copilot Desktop AppImage mapping (`github/app`, Linux x86_64 asset) in examples.
+
+### Changed
+
+- Added Python page icon to the flat, active-only-highlight navigation.
+- Updated AppImage testing script to read the release version from Cargo.toml instead of hard-coding 0.4.0.
+- Updated help documents for Bootstrap Studio's license-aware built-in updater and distinct GitHub Copilot distributions.
+
+### Safety
+
+- No automatic package upgrades, no system-wide pip changes, no sudo, no remote scripts or idle network polling.
+- Upgrades are limited to checked and selected top-level outdated packages; older environments remain untouched.
+- A failed `pip check` is reported as a dependency warning rather than false success.
+- Version v0.4.1 is source code ready for local Rust/GTK4 compilation; portable AppImage must be built and tested on Ubuntu.
+
 ## [0.4.0] - 2026-10-21
 
 ### Added

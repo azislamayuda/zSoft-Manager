@@ -2,9 +2,9 @@
 
 **zSoft Manager** is a lightweight, native Rust + GTK4 application manager for Ubuntu and related Linux distributions, created by [@azislamayuda](https://github.com/azislamayuda).
 
-**Current release: v0.4.0** — AppImage updates and NVM-managed Node.js / npm updates. Updates run only when you request them.
+**Current release: v0.4.1** — AppImage, NVM-managed Node.js, and Python virtual environment package updates. Updates run only when you request them.
 
-> The app currently manages **AppImage** files and an **NVM-managed Node.js toolchain**. `.deb`, Flatpak and Snap package management are not yet implemented.
+> The app currently manages **AppImage** files, an **NVM-managed Node.js toolchain**, and a **Python virtual environment**. `.deb`, Flatpak and Snap package management are not yet implemented.
 
 ## Features
 
@@ -13,13 +13,33 @@
 - GitHub Releases update sources and the official KDE Kdenlive download server.
 - Versionless stable filenames, compatibility symlinks, one-step backup/rollback and size / ELF / publisher SHA256 verification when available.
 - Inline toast notifications for successful saves, scans, updates, failures and rollbacks; no extra windows.
-- Four in-window pages: **AppImage**, **Node.js**, **About**, and **Changelog**.
+- Five in-window pages: **AppImage**, **Node.js**, **Python**, **About**, and **Changelog**.
 - **Node.js Toolchain:** inspect installed NVM, active Node.js, Node LTS and npm without network; manually check upstream versions; choose individual installs for NVM, Node LTS, npm and optional Node Current.
 - Node LTS stays the default; no automatic deletion of old Node versions and no system Node.js packages or sudo operations.
+- **Python Environment:** activate/deactivate an environment for in-app operations; inspect Python/pip and top-level packages; manually check `pip list --outdated --not-required`; select packages to upgrade and run `pip check`.
+- Default Python virtual environment: `~/myenv` (configurable, including `/home/myenv`); zSoft Manager does not modify other terminals or the system Python installation.
 - Only the current navigation icon has a soft-blue background; inactive icon-only buttons are transparent.
 - GTK4 client-side titlebar with grouped, more compact minimize / maximize / close controls and an updated **Zs monogram** SVG icon.
 - Header **Update** icon next to Changelog checks [this project's GitHub Releases](https://github.com/azislamayuda/zSoft-Manager/releases) and, after a second click, installs a verified update when running as an AppImage from a managed subfolder.
 - Friendly errors when no release is published or running from `cargo run`.
+
+## Python virtual environment (v0.4.1)
+
+The Python icon sits immediately after the Node.js icon. To use it:
+
+1. Enter your virtual environment directory. The default is `~/myenv`, matching the previous `mpip` / `zpip` aliases. You may enter `/home/myenv` if that is your actual location.
+2. Click **Activate**. This only selects the environment for zSoft Manager's commands; it does not run `source .../bin/activate` or alter existing terminal sessions.
+3. Click **Check updates** for a PyPI query equivalent to `~/myenv/bin/python -m pip list --outdated --not-required --format=json`.
+4. Uncheck packages you do not want to upgrade, then click **Update selected**. The app runs the virtual environment's `python -m pip install --upgrade ...`, followed by `python -m pip check`.
+5. Click **Deactivate** to stop Python management in this GUI session.
+
+Installed packages are never upgraded without clicking **Update selected**. pip installations run without a shell and without sudo; zSoft Manager does not update Python itself or packages outside the chosen virtual environment. pip may also update or install transitive dependencies when required by the selected top-level packages. Before upgrading complex environments, back up your dependencies with `~/myenv/bin/python -m pip freeze > requirements-before-update.txt`.
+
+## Bootstrap Studio and GitHub Copilot update sources
+
+- **Bootstrap Studio** uses its official, license-aware, built-in update system. Its download link comes from the license email; it is not an ordinary public GitHub Release, so zSoft Manager does not try to bypass the built-in updater. Official help: https://bootstrapstudio.io/contact-us
+- **GitHub Copilot desktop application (Linux AppImage)** publishes builds at https://github.com/github/app/releases . Configure the AppImage Source provider as GitHub, repository `github/app`, release asset `GitHub-Copilot-linux-x64.AppImage`. Set the installed pattern and directory to match your actual `~/Applications` layout. See `examples/sources.example.json`.
+- **GitHub Copilot CLI** uses a *different* repository: https://github.com/github/copilot-cli/releases . The **VS Code extension** updates through VS Code's extension manager, not AppImage.
 
 ## Requirements
 
@@ -49,11 +69,11 @@ Download the latest `zSoft-Manager-vX.Y.Z-x86_64.AppImage` from [GitHub Releases
 
 ```bash
 mkdir -p "$HOME/Applications/zSoft-Manager"
-install -m755 ~/Downloads/zSoft-Manager-v0.4.0-x86_64.AppImage   "$HOME/Applications/zSoft-Manager/zSoft-Manager.AppImage"
+install -m755 ~/Downloads/zSoft-Manager-v0.4.1-x86_64.AppImage   "$HOME/Applications/zSoft-Manager/zSoft-Manager.AppImage"
 ./scripts/install-desktop.sh
 ```
 
-The example filename above refers to v0.4.0; adjust to the release you downloaded. The stable destination name is `zSoft-Manager.AppImage`. The application can update itself only from this managed subdirectory (not from `cargo run`, nor directly from the `~/Applications` root). The first click on the Update icon checks, and the second click confirms installation; restart after a successful self-update.
+The example filename above refers to v0.4.1; adjust to the release you downloaded. The stable destination name is `zSoft-Manager.AppImage`. The application can update itself only from this managed subdirectory (not from `cargo run`, nor directly from the `~/Applications` root). The first click on the Update icon checks, and the second click confirms installation; restart after a successful self-update.
 
 ## Build an AppImage
 
@@ -65,7 +85,7 @@ bash scripts/build-appimage.sh
 
 On x86_64 Ubuntu, the script downloads an official linuxdeploy binary if not already cached, assembles GTK4-linked components into an AppDir and writes the AppImage + SHA256 file to `dist/`. Runtime portability must still be smoke-tested on the target Ubuntu versions. It is also possible to create a release via the GitHub Actions workflow by pushing a tag, after building and testing locally.
 
-Use GitHub Desktop for **Commit to main** and **Push origin**. Create the tag `v0.4.0` from GitHub's new-release page, rather than using Git CLI.
+Use GitHub Desktop for **Commit to main** and **Push origin**. Create the tag `v0.4.1` from GitHub's new-release page, rather than using Git CLI.
 
 The GitHub Actions `release-appimage.yml` job will test, build, package, and upload the AppImage to GitHub Releases. A Release is required before the self-updater works; an empty repository is not a Release.
 
@@ -75,7 +95,7 @@ The development repository is expected at `/home/lamayuda/ZDATA/ME/GITHUB/zSoft-
 
 ## Previous zAppImage Manager migration
 
-If you already cloned `zSoft-Manager` via GitHub Desktop, **do not run the old migration script again**. Extract the v0.4.0 PATCH into your existing clone. Do not overwrite `.git`. Local Git operations are performed with GitHub Desktop, not the command line.
+If you already cloned `zSoft-Manager` via GitHub Desktop, **do not run the old migration script again**. Extract the v0.4.1 PATCH into your existing clone. Do not overwrite `.git`. Local Git operations are performed with GitHub Desktop, not the command line.
 
 Source configuration reads existing `~/.config/zappimage-manager/sources.json` and state `~/.local/state/zappimage-manager/installed.json` as a fallback, and saves future changes under `zsoft-manager`. Old files remain untouched and existing rollback backups are preserved.
 
@@ -91,7 +111,9 @@ Copyright (c) 2026 Azis Lamayuda. **Personal and non-commercial use only. No sal
 
 ## Project layout
 
-- `src/ui.rs` — GTK4 screens, toast notifications, actions
+- `src/ui.rs` — GTK4 screens, navigation, toast notifications, actions
+- `src/python_env.rs` — Python venv and pip inspection/update logic
+- `src/python_ui.rs` — Python GTK4 page, activation, package selection
 - `src/config.rs` — sources / version state with legacy fallback
 - `src/update.rs` — GitHub + KDE downloads, validation, rollback
 - `src/self_update.rs` — own GitHub Release check + guarded update
