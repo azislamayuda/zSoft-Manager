@@ -356,56 +356,62 @@ fn inspect(ui: &Rc<RefCell<Ui>>, remote: bool) {
         let _ = tx.send(result);
     });
     let ui = ui.clone();
-    glib::timeout_add_local(Duration::from_millis(150), move || match rx.try_recv() {
-        Ok(result) => {
-            let mut model = ui.borrow_mut();
-            model.busy = false;
-            match result {
-                Ok((info, updates)) => {
-                    model
-                        .interpreter
-                        .set_text(&format!("Python: {}", info.python));
-                    model.pip.set_text(&format!("pip: {}", info.pip));
-                    model.count.set_text(&format!(
-                        "Installed top-level packages: {}",
-                        info.top_level_count
-                    ));
-                    model.status.set_text(if remote {
-                        "Update check finished. Select packages to upgrade."
-                    } else {
-                        "Environment active. Click Check updates to query PyPI."
-                    });
-                    if let Err(error) = python_env::save_path(&model.path.text()) {
-                        model.status.set_text(&format!(
-                            "Environment ready, but settings could not be saved: {error}"
+    glib::timeout_add_local(Duration::from_millis(150), move || {
+        match rx.try_recv() {
+            Ok(result) => {
+                let mut model = ui.borrow_mut();
+                model.busy = false;
+                match result {
+                    Ok((info, updates)) => {
+                        model
+                            .interpreter
+                            .set_text(&format!("Python: {}", info.python));
+                        model.pip.set_text(&format!("pip: {}", info.pip));
+                        model.count.set_text(&format!(
+                            "Installed top-level packages: {}",
+                            info.top_level_count
                         ));
+                        model.status.set_text(if remote {
+                            "Update check finished. Select packages to upgrade."
+                        } else {
+                            "Environment active. Click Check updates to query PyPI."
+                        });
+                        if let Err(error) = python_env::save_path(&model.path.text()) {
+                            model.status.set_text(&format!(
+                                "Environment ready, but settings could not be saved: {error}"
+                            ));
+                        }
+                        drop(model);
+                        if let Some(updates) = updates {
+                            draw_updates(&ui, updates);
+                        }
                     }
-                    drop(model);
-                    if let Some(updates) = updates {
-                        draw_updates(&ui, updates);
+                    Err(error) => {
+                        model
+                            .status
+                            .set_text(&format!("Python check failed: {error}"));
+                        if !remote {
+                            model.active = false;
+                            model.folder = None;
+                        }
+                        // Release the mutable RefCell borrow before refresh_controls
+                        // performs a separate immutable borrow. Otherwise an error
+                        // from pip may cause a GTK main-thread panic.
+                        drop(model);
                     }
                 }
-                Err(error) => {
-                    model
-                        .status
-                        .set_text(&format!("Python check failed: {error}"));
-                    if !remote {
-                        model.active = false;
-                        model.folder = None;
-                    }
-                }
+                refresh_controls(&ui);
+                glib::ControlFlow::Break
             }
-            refresh_controls(&ui);
-            glib::ControlFlow::Break
-        }
-        Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-        Err(mpsc::TryRecvError::Disconnected) => {
-            ui.borrow_mut().busy = false;
-            ui.borrow()
-                .status
-                .set_text("Python check failed: worker disconnected");
-            refresh_controls(&ui);
-            glib::ControlFlow::Break
+            Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+            Err(mpsc::TryRecvError::Disconnected) => {
+                ui.borrow_mut().busy = false;
+                ui.borrow()
+                    .status
+                    .set_text("Python check failed: worker disconnected");
+                refresh_controls(&ui);
+                glib::ControlFlow::Break
+            }
         }
     });
 }

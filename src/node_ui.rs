@@ -241,7 +241,7 @@ fn make_badge(phase: &NodePhase) -> gtk::Label {
     badge.set_tooltip_text(Some(&phase.detail()));
     badge
 }
-fn update(model: &Rc<RefCell<Ui>>) {
+fn update(model: &Rc<RefCell<Ui>>, redraw_lists: bool) {
     // Borrow the snapshot while rendering instead of cloning the release schedule,
     // Node inventory and npm package lists on every UI refresh.
     let m = model.borrow();
@@ -310,6 +310,13 @@ fn update(model: &Rc<RefCell<Ui>>) {
             && v.nvm_available
             && node::newer(v.current.as_deref(), v.current_latest.as_deref()),
     );
+    // Disable existing row actions while an operation is running, but keep
+    // the widgets allocated until a new snapshot actually arrives.
+    installed_rows.set_sensitive(!busy);
+    global_rows.set_sensitive(!busy);
+    if !redraw_lists {
+        return;
+    }
     clear(installed_rows);
     if v.installed_nodes.is_empty() {
         installed_rows.append(&plain_text(
@@ -410,7 +417,7 @@ fn probe(model: &Rc<RefCell<Ui>>, remote: bool) {
             "Reading locally installed Node.js tools…"
         });
     }
-    update(model);
+    update(model, false);
     let (tx, rx) = mpsc::channel();
     thread::spawn(move || {
         let _ = tx.send(node::inspect(remote));
@@ -420,6 +427,7 @@ fn probe(model: &Rc<RefCell<Ui>>, remote: bool) {
         Ok(result) => {
             let mut m = model.borrow_mut();
             m.busy = false;
+            let redraw_lists = result.is_ok();
             match result {
                 Ok(snapshot) => {
                     let warning = snapshot.warnings.join(" · ");
@@ -432,7 +440,7 @@ fn probe(model: &Rc<RefCell<Ui>>, remote: bool) {
                 Err(e) => m.status.set_text(&format!("Check failed: {e}")),
             }
             drop(m);
-            update(&model);
+            update(&model, redraw_lists);
             glib::ControlFlow::Break
         }
         Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
@@ -442,7 +450,7 @@ fn probe(model: &Rc<RefCell<Ui>>, remote: bool) {
                 .borrow()
                 .status
                 .set_text("Check failed: worker disconnected");
-            update(&model);
+            update(&model, false);
             glib::ControlFlow::Break
         }
     });
@@ -460,7 +468,7 @@ where
         m.busy = true;
         m.status.set_text(progress);
     }
-    update(model);
+    update(model, false);
     let (tx, rx) = mpsc::channel();
     thread::spawn(move || {
         let result =
@@ -472,6 +480,7 @@ where
         Ok(result) => {
             let mut m = model.borrow_mut();
             m.busy = false;
+            let redraw_lists = result.is_ok();
             match result {
                 Ok((message, versions)) => {
                     m.versions = versions;
@@ -480,7 +489,7 @@ where
                 Err(err) => m.status.set_text(&format!("Operation failed: {err}")),
             }
             drop(m);
-            update(&model);
+            update(&model, redraw_lists);
             glib::ControlFlow::Break
         }
         Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
@@ -490,7 +499,7 @@ where
                 .borrow()
                 .status
                 .set_text("Operation failed: worker disconnected");
-            update(&model);
+            update(&model, false);
             glib::ControlFlow::Break
         }
     });

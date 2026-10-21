@@ -4,11 +4,6 @@ All notable changes to this project are recorded here. Format follows Keep a Cha
 
 ## [0.4.3] - 2026-10-21
 
-### Fixed
-
-- Fixed Rust compiler error E0505 in GitHub release asset selection by cloning the small release tag string before it is used with borrowed asset data.
-- Fixed global npm outdated JSON parsing caused by an extra closing brace in the Bash command output.
-
 ### Added
 
 - GitHub self-update readiness states to distinguish an incomplete release upload from an incorrectly configured asset pattern.
@@ -25,6 +20,14 @@ All notable changes to this project are recorded here. Format follows Keep a Cha
 - Bound GitHub API responses to 2 MiB and checksum downloads to 4 KiB to avoid unlimited response buffering.
 - Select AppImage release assets with borrowed iterators instead of allocating an additional candidate list.
 - Preserve sequential, manual-only updates. No new background services or runtime dependencies.
+
+### Fixed (pre-release audit)
+
+- Fixed Rust E0505 borrow/move error in the GitHub asset selector by cloning only the release tag when constructing the result.
+- Corrected the Bash `npm outdated` fallback which previously appended an extra closing brace to JSON, including when no packages were outdated.
+- Prevented a GTK main-thread `RefCell` borrow panic after a failed Python environment or pip check.
+- Reduced unnecessary Node.js version/global-package widget recreation while the UI enters or exits a busy state without a new inventory snapshot.
+- Added offline regression tests for npm JSON output and empty/malformed pip responses.
 
 ### Notes
 

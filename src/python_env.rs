@@ -299,6 +299,18 @@ mod tests {
         assert_eq!(packages[1].latest_version, "2.32.5");
     }
     #[test]
+    fn empty_outdated_list_is_valid_but_trailing_output_is_rejected() {
+        assert!(parse_updates("[]").unwrap().is_empty());
+        assert!(parse_updates("[]\nWARNING: external output").is_err());
+    }
+    #[test]
+    fn pip_package_name_checks_are_strict() {
+        assert!(valid_package_name("requests"));
+        assert!(valid_package_name("typing_extensions"));
+        assert!(!valid_package_name("--prefix=/tmp/evil"));
+        assert!(!valid_package_name("fake package"));
+    }
+    #[test]
     fn filters_malicious_package_names() {
         let data = r#"[{"name":"valid-package","version":"1","latest_version":"2"},{"name":"--target=/tmp","version":"1","latest_version":"2"}]"#;
         assert_eq!(parse_updates(data).unwrap().len(), 1);
