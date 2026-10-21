@@ -28,7 +28,11 @@ fn source() -> Source {
 pub fn check_release() -> Result<(ReleaseInfo, CheckState), String> {
     // This is a *check* only, so it also works when launched with cargo run.
     // Explicit installed version avoids interpreting filenames as versions.
-    update::check(&source(), Path::new(STABLE_FILENAME), Some(info::VERSION))
+    update::check(
+        &source(),
+        Path::new(STABLE_FILENAME),
+        Some(&info::release_version()),
+    )
 }
 
 fn allowed_parent(root: &Path, parent: &Path) -> bool {

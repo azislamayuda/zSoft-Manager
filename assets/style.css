@@ -1,4 +1,4 @@
-/* zSoft Manager 0.4.1 — soft-blue, modern flat GTK4. No remote UI assets. */
+/* zSoft Manager 0.4.2.1 — soft-blue, modern flat GTK4. No remote UI assets. */
 window { background: #f6f9fd; color: #283b55; }
 .app-root { background: #f6f9fd; }
 .hero {
@@ -9,17 +9,19 @@ window { background: #f6f9fd; color: #283b55; }
 .headline { color: #1f4e81; font-size: 25px; font-weight: 750; }
 .subline { color: #7187a1; font-size: 12px; }
 .navigation { padding: 2px; }
+/* Uniform symbolic icons: all six header buttons share the same hit target. */
 button.nav-icon-button {
   background: transparent;
   border: 1px solid transparent;
   border-radius: 11px;
   box-shadow: none;
-  min-width: 42px;
-  min-height: 42px;
-  padding: 7px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 6px;
   color: #53779f;
 }
 button.nav-icon-button:hover { background: transparent; color: #245c98; }
+button.nav-icon-button image { color: inherit; }
 button.nav-icon-button.nav-active {
   background: #d8eafd;
   border-color: #bdd7f5;
@@ -179,7 +181,7 @@ combobox.form-input > box > button {
 }
 combobox.form-input > box > button:hover { background: #f1f7ff; border-color: #abc9e8; }
 
-/* In-window, transient notifications: no extra window or idle polling. */
+/* Centered bottom toast above the fixed footer; still an in-window overlay. */
 revealer.toast-success .toast { background: #e5f5eb; border-color: #addac1; color: #246247; }
 revealer.toast-info .toast { background: #e9f3ff; border-color: #b7d7f8; color: #245d94; }
 revealer.toast-error .toast { background: #fff1ef; border-color: #f5c9c3; color: #9b4039; }

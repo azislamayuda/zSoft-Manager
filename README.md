@@ -2,7 +2,7 @@
 
 **zSoft Manager** is a lightweight, native Rust + GTK4 application manager for Ubuntu and related Linux distributions, created by [@azislamayuda](https://github.com/azislamayuda).
 
-**Current release: v0.4.2** — AppImage, NVM-managed Node.js, and Python virtual environment package updates. Updates run only when you request them.
+**Current release: v0.4.2.1** The public four-part version uses valid Cargo SemVer `0.4.2+1` internally; the GUI, AppImage filename, and GitHub tag use `v0.4.2.1`. — AppImage, NVM-managed Node.js, and Python virtual environment package updates. Updates run only when you request them.
 
 > The app currently manages **AppImage** files, an **NVM-managed Node.js toolchain**, and a **Python virtual environment**. `.deb`, Flatpak and Snap package management are not yet implemented.
 
@@ -12,14 +12,15 @@
 - On-demand recursive AppImage discovery in **subfolders** of `~/Applications` only. Direct files in `~/Applications` and every `ArtCraft` directory are excluded.
 - GitHub Releases update sources and the official KDE Kdenlive download server.
 - Versionless stable filenames, compatibility symlinks, one-step backup/rollback and size / ELF / publisher SHA256 verification when available.
-- Inline toast notifications for successful saves, scans, updates, failures and rollbacks; no extra windows.
+- Bottom-center in-window toast notifications for successful saves, scans, updates, failures and rollbacks; no extra windows.
 - Five in-window pages: **AppImage**, **Node.js**, **Python**, **About**, and **Changelog**.
 - **Node.js Toolchain:** inspect NVM, active/default Node, lifecycle status, all installed versions and global npm packages locally; manually check upstream versions and install individual updates.
 - NVM default can be switched explicitly; no automatic deletion of old Node versions, system Node changes, or sudo operations.
 - **Python Environment:** activate/deactivate an environment for in-app operations; inspect Python/pip and top-level packages; manually check `pip list --outdated --not-required`; select packages to upgrade and run `pip check`.
 - Default Python virtual environment: `~/myenv` (configurable, including `/home/myenv`); zSoft Manager does not modify other terminals or the system Python installation.
-- Only the current navigation icon has a soft-blue background; inactive icon-only buttons are transparent.
+- All six header navigation icons use consistent 20 px GTK symbolic line art with 44 px hit targets. Only the active page gets a soft-blue background; inactive buttons remain transparent.
 - GTK4 client-side titlebar with grouped, more compact minimize / maximize / close controls and an updated **Zs monogram** SVG icon.
+- Default window size 1040 × 780 pixels (was 1040 × 720).
 - Header **Update** icon next to Changelog checks [this project's GitHub Releases](https://github.com/azislamayuda/zSoft-Manager/releases) and, after a second click, installs a verified update when running as an AppImage from a managed subfolder.
 - Friendly errors when no release is published or running from `cargo run`.
 

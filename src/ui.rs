@@ -76,6 +76,21 @@ impl Page {
 
 const MAIN_ACTION_LABELS: [&str; 3] = ["Rescan", "Check updates", "Update all"];
 
+// All navigation assets are GTK symbolic icons. Using theme icons instead of
+// GtkImage::from_paintable keeps Node and Python at the same pixel size as the
+// About and Changelog icons, regardless of the original PNG dimensions.
+const NAV_SYMBOLIC_ICONS: [&str; 6] = [
+    "application-x-executable-symbolic",  // AppImage
+    "utilities-terminal-symbolic",        // Node.js
+    "applications-development-symbolic",  // Python
+    "help-about-symbolic",                // About
+    "document-open-recent-symbolic",      // Changelog
+    "software-update-available-symbolic", // Self-update
+];
+const NAV_ICON_SIZE: i32 = 20;
+const NAV_BUTTON_SIZE: i32 = 44;
+const TOAST_BOTTOM_MARGIN: i32 = 58;
+
 fn button_with_icon(label: &str, icon_name: &str, style: &str) -> gtk::Button {
     let button = gtk::Button::new();
     button.add_css_class(style);
@@ -105,39 +120,12 @@ fn set_button_text(button: &gtk::Button, label: &str) {
     }
 }
 
-fn node_icon_button() -> gtk::Button {
-    let button = gtk::Button::new();
-    button.add_css_class("nav-icon-button");
-    button.set_tooltip_text(Some("Node.js / npm / NVM"));
-    let bytes = glib::Bytes::from_static(include_bytes!("../assets/node-mark.png"));
-    let image = match gdk::Texture::from_bytes(&bytes) {
-        Ok(texture) => gtk::Image::from_paintable(Some(&texture)),
-        Err(_) => gtk::Image::from_icon_name("utilities-terminal-symbolic"),
-    };
-    image.set_pixel_size(22);
-    button.set_child(Some(&image));
-    button
-}
-
-fn python_icon_button() -> gtk::Button {
-    let button = gtk::Button::new();
-    button.add_css_class("nav-icon-button");
-    button.set_tooltip_text(Some("Python environments / pip"));
-    let bytes = glib::Bytes::from_static(include_bytes!("../assets/python-mark.png"));
-    let image = match gdk::Texture::from_bytes(&bytes) {
-        Ok(texture) => gtk::Image::from_paintable(Some(&texture)),
-        Err(_) => gtk::Image::from_icon_name("applications-development-symbolic"),
-    };
-    image.set_pixel_size(22);
-    button.set_child(Some(&image));
-    button
-}
-
 fn icon_only_button(icon_name: &str, tooltip: &str) -> gtk::Button {
     let button = gtk::Button::new();
     button.add_css_class("nav-icon-button");
     let icon = gtk::Image::from_icon_name(icon_name);
-    icon.set_pixel_size(20);
+    icon.set_pixel_size(NAV_ICON_SIZE);
+    button.set_size_request(NAV_BUTTON_SIZE, NAV_BUTTON_SIZE);
     button.set_child(Some(&icon));
     button.set_tooltip_text(Some(tooltip));
     button
@@ -219,7 +207,7 @@ fn build_ui(app: &gtk::Application) {
         .application(app)
         .title("zSoft Manager")
         .default_width(1040)
-        .default_height(720)
+        .default_height(780)
         .build();
 
     // GTK-owned CSD headerbar groups the title controls closer together.
@@ -257,20 +245,17 @@ fn build_ui(app: &gtk::Application) {
     let navigation = gtk::Box::new(gtk::Orientation::Horizontal, 8);
     navigation.set_valign(gtk::Align::Center);
     navigation.add_css_class("navigation");
-    let appimage_nav = icon_only_button("application-x-executable-symbolic", "AppImage Manager");
-    let node_nav = node_icon_button();
-    let python_nav = python_icon_button();
-    let about_nav = icon_only_button("help-about-symbolic", "About");
-    let changelog_nav = icon_only_button("document-open-recent-symbolic", "Changelog");
+    let appimage_nav = icon_only_button(NAV_SYMBOLIC_ICONS[0], "AppImage Manager");
+    let node_nav = icon_only_button(NAV_SYMBOLIC_ICONS[1], "Node.js / npm / NVM");
+    let python_nav = icon_only_button(NAV_SYMBOLIC_ICONS[2], "Python environments / pip");
+    let about_nav = icon_only_button(NAV_SYMBOLIC_ICONS[3], "About");
+    let changelog_nav = icon_only_button(NAV_SYMBOLIC_ICONS[4], "Changelog");
     navigation.append(&appimage_nav);
     navigation.append(&node_nav);
     navigation.append(&python_nav);
     navigation.append(&about_nav);
     navigation.append(&changelog_nav);
-    let self_button = icon_only_button(
-        "software-update-available-symbolic",
-        "Check zSoft Manager updates",
-    );
+    let self_button = icon_only_button(NAV_SYMBOLIC_ICONS[5], "Check zSoft Manager updates");
     navigation.append(&self_button);
     hero.append(&navigation);
     root_panel.append(&hero);
@@ -358,7 +343,7 @@ fn build_ui(app: &gtk::Application) {
     let details = gtk::Box::new(gtk::Orientation::Vertical, 0);
     details.add_css_class("detail-list");
     detail_row(&details, "Application", info::APP_NAME);
-    detail_row(&details, "Version", info::VERSION);
+    detail_row(&details, "Version", &info::release_version());
     detail_row(&details, "Developer", "Azis Lamayuda");
     detail_row(&details, "Technology", "Rust · GTK4");
     detail_row(&details, "License", info::LICENSE_NAME);
@@ -481,12 +466,12 @@ fn build_ui(app: &gtk::Application) {
 
     // Non-blocking toast notifications share the main GtkWindow; no extra Dock indicator.
     let toast = gtk::Revealer::new();
-    toast.set_transition_type(gtk::RevealerTransitionType::SlideDown);
+    toast.set_transition_type(gtk::RevealerTransitionType::SlideUp);
     toast.set_transition_duration(220);
-    toast.set_halign(gtk::Align::End);
-    toast.set_valign(gtk::Align::Start);
-    toast.set_margin_top(14);
-    toast.set_margin_end(22);
+    toast.set_halign(gtk::Align::Center);
+    toast.set_valign(gtk::Align::End);
+    // Show toasts above the bottom footer, horizontally centered.
+    toast.set_margin_bottom(TOAST_BOTTOM_MARGIN);
     toast.set_reveal_child(false);
     let toast_box = gtk::Box::new(gtk::Orientation::Horizontal, 10);
     toast_box.add_css_class("toast");
@@ -1651,5 +1636,29 @@ mod ui_tests {
         source.installed_pattern = "other-*.AppImage".into();
         assert!(validate_source_input(&source, "old.AppImage").is_err());
         assert!(validate_source_input(&source, "Bootstrap Studio.AppImage").is_ok());
+    }
+}
+
+#[cfg(test)]
+mod navigation_tests {
+    use super::*;
+
+    #[test]
+    fn all_header_navigation_icons_use_symbolic_gtk_icons() {
+        assert_eq!(NAV_SYMBOLIC_ICONS.len(), 6);
+        assert!(NAV_SYMBOLIC_ICONS
+            .iter()
+            .all(|name| name.ends_with("-symbolic")));
+        let mut unique = NAV_SYMBOLIC_ICONS.to_vec();
+        unique.sort_unstable();
+        unique.dedup();
+        assert_eq!(unique.len(), NAV_SYMBOLIC_ICONS.len());
+    }
+
+    #[test]
+    fn header_icon_dimensions_and_toast_margin_are_compact() {
+        assert_eq!(NAV_ICON_SIZE, 20);
+        assert_eq!(NAV_BUTTON_SIZE, 44);
+        assert!(TOAST_BOTTOM_MARGIN > NAV_BUTTON_SIZE);
     }
 }

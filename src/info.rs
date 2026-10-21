@@ -3,14 +3,20 @@
 
 pub const APP_NAME: &str = "zSoft Manager";
 pub const LICENSE_NAME: &str = "Personal Use / Noncommercial";
-pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+pub const CARGO_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+// Cargo requires SemVer (0.4.2+1), while GitHub release filenames use 0.4.2.1.
+// This maps an optional build-metadata revision without changing SemVer parsing.
+pub fn release_version() -> String {
+    CARGO_VERSION.replace('+', ".")
+}
 pub const GITHUB_HANDLE: &str = "@azislamayuda";
 pub const GITHUB_URL: &str = "https://github.com/azislamayuda/zSoft-Manager";
 pub const CHANGELOG: &str = include_str!("../CHANGELOG.md");
 pub const GITHUB_ICON: &[u8] = include_bytes!("../assets/github-mark.png");
 
 pub fn version_label() -> String {
-    format!("v.{VERSION}")
+    format!("v.{}", release_version())
 }
 
 #[cfg(test)]
@@ -19,8 +25,15 @@ mod tests {
 
     #[test]
     fn version_is_read_from_cargo_manifest() {
-        assert_eq!(VERSION, env!("CARGO_PKG_VERSION"));
-        assert_eq!(version_label(), format!("v.{}", env!("CARGO_PKG_VERSION")));
+        assert_eq!(CARGO_VERSION, env!("CARGO_PKG_VERSION"));
+        assert_eq!(release_version(), CARGO_VERSION.replace('+', "."));
+        assert_eq!(version_label(), format!("v.{}", release_version()));
+    }
+
+    #[test]
+    fn four_part_release_label_maps_to_valid_cargo_semver() {
+        assert_eq!(CARGO_VERSION, "0.4.2+1");
+        assert_eq!(release_version(), "0.4.2.1");
     }
 
     #[test]
@@ -32,7 +45,7 @@ mod tests {
 
     #[test]
     fn embedded_changelog_includes_current_release() {
-        assert!(CHANGELOG.contains(&format!("## [{}]", VERSION)));
+        assert!(CHANGELOG.contains(&format!("## [{}]", release_version())));
         assert!(CHANGELOG.contains("## [0.2.0]"));
         assert!(CHANGELOG.contains("## [0.1.0]"));
     }

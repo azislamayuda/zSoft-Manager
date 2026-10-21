@@ -7,6 +7,7 @@ cd "$repo"
 [[ "$(uname -m)" == "x86_64" ]] || { echo 'Only x86_64 is supported.' >&2; exit 1; }
 [[ -x target/release/zsoft-manager ]] || { echo 'Run cargo build --release first.' >&2; exit 1; }
 version="$(sed -n '/^version *=/{s/.*= *"\([^"]*\)".*/\1/p;q;}' Cargo.toml)"
+release_version="${version//+/.}"
 appdir="$repo/build/zSoftManager.AppDir"
 mkdir -p "$repo/build/tools" "$repo/dist"
 rm -rf "$appdir"
@@ -28,7 +29,7 @@ chmod +x "$linuxdeploy"
 # FUSE is often unavailable in CI; extraction fallback avoids needing /dev/fuse.
 cd "$repo/build"
 find "$repo/build" -maxdepth 1 -type f -name "*.AppImage" -delete
-VERSION="$version" ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 "$linuxdeploy" \
+VERSION="$release_version" ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 "$linuxdeploy" \
   --appdir "$appdir" \
   --executable "$appdir/usr/bin/zsoft-manager" \
   --desktop-file "$appdir/usr/share/applications/io.github.azislamayuda.zsoft-manager.desktop" \
@@ -39,7 +40,7 @@ if [[ "${#images[@]}" -ne 1 ]]; then
   printf 'Expected exactly one built AppImage, found %s.\n' "${#images[@]}" >&2
   exit 1
 fi
-output="$repo/dist/zSoft-Manager-v${version}-x86_64.AppImage"
+output="$repo/dist/zSoft-Manager-v${release_version}-x86_64.AppImage"
 install -Dm755 "${images[0]}" "$output"
 (cd "$repo/dist" && sha256sum "$(basename "$output")" > "$(basename "$output").sha256")
 printf 'AppImage built: %s\n' "$output"

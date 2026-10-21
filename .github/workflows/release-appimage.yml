@@ -24,7 +24,8 @@ jobs:
         shell: bash
         run: |
           version=$(sed -n '/^version *=/{s/.*= *"\([^"]*\)".*/\1/p;q;}' Cargo.toml)
-          test "$GITHUB_REF_NAME" = "v$version" || { echo "Release tag must match Cargo.toml version"; exit 1; }
+          release_version="${version//+/.}"
+          test "$GITHUB_REF_NAME" = "v$release_version" || { echo "Release tag must match the mapped Cargo version"; exit 1; }
       - name: Format check
         run: cargo fmt --check
       - name: Test

@@ -2,6 +2,21 @@
 
 All notable changes to this project are recorded here. Format follows Keep a Changelog.
 
+## [0.4.2.1] - 2026-10-21
+
+### Fixed
+
+- Standardized all six header navigation icons (AppImage, Node.js, Python, About, Changelog, and self-update) with GTK symbolic icons at 20 px in consistent 44 px hit targets.
+- Removed raster PNG-based Node.js and Python header icons, which previously rendered at inconsistent natural sizes on some GTK themes.
+- Moved in-window toast notifications to the bottom-center and switched the entrance animation to slide upward; toasts remain above the fixed footer without creating extra windows.
+
+### Changed
+
+- Increased default application window height from 720 px to 780 px for more comfortable Node.js and Python pages.
+- Kept flat transparent backgrounds for inactive header navigation icons and soft-blue highlighting only for the active page.
+- Preserved all v0.4.2 application-management behavior; no changes to update or install operations.
+- Represented the four-part public version `0.4.2.1` as valid Cargo SemVer `0.4.2+1`, mapped back to the public version for the About page, self-update comparisons, AppImage filenames, and GitHub tag validation.
+
 ## [0.4.2] - 2026-10-21
 
 ### Added
