@@ -32,8 +32,8 @@ mod tests {
 
     #[test]
     fn release_label_matches_cargo_semver() {
-        assert_eq!(CARGO_VERSION, "0.4.4");
-        assert_eq!(release_version(), "0.4.4");
+        assert_eq!(CARGO_VERSION, "0.4.5");
+        assert_eq!(release_version(), "0.4.5");
     }
 
     #[test]

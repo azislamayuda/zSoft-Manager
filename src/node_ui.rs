@@ -151,7 +151,7 @@ pub fn build() -> gtk::Box {
         "Node.js Current",
         "Optional; installed only after an explicit click",
     );
-    section_title(&cards, "Installed Node.js versions", "Choose Set default to change NVM's default for new shells. Already-open terminals do not change.");
+    section_title(&cards, "Installed Node.js versions", "Set default for new shells, or remove superseded versions of the same major line. Removal is optional and also deletes that version's global npm packages.");
     let installed_rows = gtk::Box::new(gtk::Orientation::Vertical, 7);
     cards.append(&installed_rows);
     section_title(&cards, "Global npm packages", "Installed with the default NVM Node. Check updates first, then update packages individually.");
@@ -350,9 +350,26 @@ fn update(model: &Rc<RefCell<Ui>>, redraw_lists: bool) {
         switch.set_sensitive(!busy && v.nvm_available && !default);
         switch.set_valign(gtk::Align::Center);
         let version = entry.version.clone();
-        let model = model.clone();
-        switch.connect_clicked(move |_| set_default(&model, version.clone()));
+        let switch_model = Rc::clone(model);
+        switch.connect_clicked(move |_| set_default(&switch_model, version.clone()));
         line.append(&switch);
+        if node::old_node_cleanup_candidate(
+            &v.installed_nodes,
+            &entry.version,
+            v.default_node.as_deref(),
+            v.node_active.as_deref(),
+        ) {
+            let remove = action("Remove old", "user-trash-symbolic", "flat-button");
+            remove.set_valign(gtk::Align::Center);
+            remove.set_sensitive(!busy && v.nvm_available);
+            remove.set_tooltip_text(Some(
+                "Remove this superseded NVM version and its version-specific global npm packages",
+            ));
+            let version = entry.version.clone();
+            let model = model.clone();
+            remove.connect_clicked(move |_| confirm_remove_old_version(&model, &version));
+            line.append(&remove);
+        }
         installed_rows.append(&line);
     }
     clear(global_rows);
@@ -456,6 +473,28 @@ fn probe(model: &Rc<RefCell<Ui>>, remote: bool) {
     });
 }
 
+// Surface NVM failures immediately. The status label at the bottom of the
+// scrolling Node page can otherwise be out of view when removing a version.
+fn show_operation_error(model: &Rc<RefCell<Ui>>, message: &str) {
+    let dialog = gtk::MessageDialog::builder()
+        .modal(true)
+        .message_type(gtk::MessageType::Error)
+        .buttons(gtk::ButtonsType::Close)
+        .text("Node.js operation failed")
+        .secondary_text(message)
+        .build();
+    if let Some(window) = model
+        .borrow()
+        .installed_rows
+        .root()
+        .and_then(|root| root.downcast::<gtk::Window>().ok())
+    {
+        dialog.set_transient_for(Some(&window));
+    }
+    dialog.connect_response(|dialog, _| dialog.close());
+    dialog.present();
+}
+
 fn operation<F>(model: &Rc<RefCell<Ui>>, progress: &str, job: F)
 where
     F: FnOnce() -> Result<String, String> + Send + 'static,
@@ -481,15 +520,22 @@ where
             let mut m = model.borrow_mut();
             m.busy = false;
             let redraw_lists = result.is_ok();
+            let mut error_message = None;
             match result {
                 Ok((message, versions)) => {
                     m.versions = versions;
                     m.status.set_text(&message);
                 }
-                Err(err) => m.status.set_text(&format!("Operation failed: {err}")),
+                Err(err) => {
+                    m.status.set_text(&format!("Operation failed: {err}"));
+                    error_message = Some(err);
+                }
             }
             drop(m);
             update(&model, redraw_lists);
+            if let Some(err) = error_message {
+                show_operation_error(&model, &err);
+            }
             glib::ControlFlow::Break
         }
         Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
@@ -500,6 +546,7 @@ where
                 .status
                 .set_text("Operation failed: worker disconnected");
             update(&model, false);
+            show_operation_error(&model, "Node.js worker disconnected unexpectedly.");
             glib::ControlFlow::Break
         }
     });
@@ -526,6 +573,43 @@ fn install(model: &Rc<RefCell<Ui>>, kind: Install) {
         node::install(kind, &version)
     });
 }
+fn confirm_remove_old_version(model: &Rc<RefCell<Ui>>, version: &str) {
+    if model.borrow().busy {
+        return;
+    }
+    let dialog = gtk::MessageDialog::builder()
+        .modal(true)
+        .message_type(gtk::MessageType::Warning)
+        .buttons(gtk::ButtonsType::None)
+        .text(format!("Remove old Node.js {version}?"))
+        .secondary_text("This runs nvm uninstall. The removed version's global npm packages are deleted too. Already-open terminals using that version may need to switch Node.js. Your NVM default and active version are protected.")
+        .build();
+    if let Some(window) = model
+        .borrow()
+        .installed_rows
+        .root()
+        .and_then(|root| root.downcast::<gtk::Window>().ok())
+    {
+        dialog.set_transient_for(Some(&window));
+    }
+    dialog.add_button("Cancel", gtk::ResponseType::Cancel);
+    dialog.add_button("Remove old version", gtk::ResponseType::Accept);
+    let model = model.clone();
+    let version = version.to_owned();
+    dialog.connect_response(move |dialog, response| {
+        dialog.close();
+        if response == gtk::ResponseType::Accept {
+            let requested = version.clone();
+            operation(
+                &model,
+                "Checking NVM safety and removing old Node.js…",
+                move || node::remove_old_node_version(&requested),
+            );
+        }
+    });
+    dialog.present();
+}
+
 fn set_default(model: &Rc<RefCell<Ui>>, version: String) {
     operation(model, "Updating NVM default alias…", move || {
         node::set_default_version(&version)

@@ -1,6 +1,6 @@
 use crate::{
     config::{self, Source, SourceProvider},
-    info, naming, node_ui, python_ui, scan, self_update,
+    flatpak_ui, info, naming, node_ui, python_ui, scan, self_update,
     update::{self, CheckState, ReleaseInfo},
 };
 use gtk::{gdk, glib, prelude::*};
@@ -57,6 +57,7 @@ enum Event {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Page {
     Applications,
+    Flatpak,
     Node,
     Python,
     About,
@@ -67,6 +68,7 @@ impl Page {
     fn id(self) -> &'static str {
         match self {
             Self::Applications => "applications",
+            Self::Flatpak => "flatpak",
             Self::Node => "node",
             Self::Python => "python",
             Self::About => "about",
@@ -80,8 +82,9 @@ const MAIN_ACTION_LABELS: [&str; 3] = ["Rescan", "Check updates", "Update all"];
 // All navigation assets are GTK symbolic icons. Using theme icons instead of
 // GtkImage::from_paintable keeps Node and Python at the same pixel size as the
 // About and Changelog icons, regardless of the original PNG dimensions.
-const NAV_SYMBOLIC_ICONS: [&str; 6] = [
+const NAV_SYMBOLIC_ICONS: [&str; 7] = [
     "application-x-executable-symbolic",  // AppImage
+    "package-x-generic-symbolic",         // Flatpak
     "utilities-terminal-symbolic",        // Node.js
     "applications-development-symbolic",  // Python
     "help-about-symbolic",                // About
@@ -193,6 +196,7 @@ fn icon_only_button(icon_name: &str, tooltip: &str) -> gtk::Button {
 struct Navigation {
     stack: gtk::Stack,
     appimage: gtk::Button,
+    flatpak: gtk::Button,
     node: gtk::Button,
     python: gtk::Button,
     about: gtk::Button,
@@ -203,6 +207,7 @@ fn navigate(nav: &Navigation, page: Page) {
     nav.stack.set_visible_child_name(page.id());
     for (button, destination) in [
         (&nav.appimage, Page::Applications),
+        (&nav.flatpak, Page::Flatpak),
         (&nav.node, Page::Node),
         (&nav.python, Page::Python),
         (&nav.about, Page::About),
@@ -304,16 +309,18 @@ fn build_ui(app: &gtk::Application) {
     navigation.set_valign(gtk::Align::Center);
     navigation.add_css_class("navigation");
     let appimage_nav = icon_only_button(NAV_SYMBOLIC_ICONS[0], "AppImage Manager");
-    let node_nav = icon_only_button(NAV_SYMBOLIC_ICONS[1], "Node.js / npm / NVM");
-    let python_nav = icon_only_button(NAV_SYMBOLIC_ICONS[2], "Python environments / pip");
-    let about_nav = icon_only_button(NAV_SYMBOLIC_ICONS[3], "About");
-    let changelog_nav = icon_only_button(NAV_SYMBOLIC_ICONS[4], "Changelog");
+    let flatpak_nav = icon_only_button(NAV_SYMBOLIC_ICONS[1], "Flatpak Manager");
+    let node_nav = icon_only_button(NAV_SYMBOLIC_ICONS[2], "Node.js / npm / NVM");
+    let python_nav = icon_only_button(NAV_SYMBOLIC_ICONS[3], "Python environments / pip");
+    let about_nav = icon_only_button(NAV_SYMBOLIC_ICONS[4], "About");
+    let changelog_nav = icon_only_button(NAV_SYMBOLIC_ICONS[5], "Changelog");
     navigation.append(&appimage_nav);
+    navigation.append(&flatpak_nav);
     navigation.append(&node_nav);
     navigation.append(&python_nav);
     navigation.append(&about_nav);
     navigation.append(&changelog_nav);
-    let self_button = icon_only_button(NAV_SYMBOLIC_ICONS[5], "Check zSoft Manager updates");
+    let self_button = icon_only_button(NAV_SYMBOLIC_ICONS[6], "Check zSoft Manager updates");
     navigation.append(&self_button);
     hero.append(&navigation);
     root_panel.append(&hero);
@@ -364,6 +371,11 @@ fn build_ui(app: &gtk::Application) {
     apps_page.append(&scroller);
     stack.add_named(&apps_page, Some(Page::Applications.id()));
 
+    // Flatpak initializes only after the navigation icon is opened.
+    let flatpak_page = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    stack.add_named(&flatpak_page, Some(Page::Flatpak.id()));
+    let flatpak_loaded = Rc::new(Cell::new(false));
+
     // Build heavy toolchain pages only when opened. This avoids starting Node
     // subprocesses at startup and reduces GTK widget allocations on AppImage-only sessions.
     let node_page = gtk::Box::new(gtk::Orientation::Vertical, 0);
@@ -393,7 +405,7 @@ fn build_ui(app: &gtk::Application) {
     about_title.set_xalign(0.0);
     about_content.append(&about_title);
     let about_description = gtk::Label::new(Some(
-        "A lightweight native software manager for Ubuntu. Manage AppImages from GitHub or KDE, and check or update Node.js LTS, npm and NVM."
+        "A lightweight native software manager for Ubuntu. Manage AppImages, Flatpak applications and runtimes, Node.js, npm, and Python environments."
     ));
     about_description.set_wrap(true);
     about_description.set_xalign(0.0);
@@ -409,7 +421,7 @@ fn build_ui(app: &gtk::Application) {
     detail_row(
         &details,
         "Update source",
-        "GitHub Releases · KDE Downloads · nvm-sh · Node.js · npm",
+        "GitHub Releases · KDE Downloads · Flatpak remotes · nvm-sh · Node.js · npm",
     );
     detail_row(&details, "Network", "On demand only · No background daemon");
     about_content.append(&details);
@@ -465,6 +477,7 @@ fn build_ui(app: &gtk::Application) {
     let nav = Navigation {
         stack: stack.clone(),
         appimage: appimage_nav.clone(),
+        flatpak: flatpak_nav.clone(),
         node: node_nav.clone(),
         python: python_nav.clone(),
         about: about_nav.clone(),
@@ -543,20 +556,54 @@ fn build_ui(app: &gtk::Application) {
     toast.set_child(Some(&toast_box));
     overlay.add_overlay(&toast);
     window.set_child(Some(&overlay));
+    let toast_sequence = Rc::new(Cell::new(0_u64));
 
     for (page, button) in [
         (Page::Applications, appimage_nav.clone()),
+        (Page::Flatpak, flatpak_nav.clone()),
         (Page::Node, node_nav.clone()),
         (Page::Python, python_nav.clone()),
         (Page::About, about_nav.clone()),
         (Page::Changelog, changelog_nav.clone()),
     ] {
         let nav = nav.clone();
+        let flatpak_page = flatpak_page.clone();
+        let flatpak_toast = toast.clone();
+        let flatpak_label = toast_label.clone();
+        let flatpak_sequence = toast_sequence.clone();
+        let flatpak_loaded = flatpak_loaded.clone();
         let node_page = node_page.clone();
         let python_page = python_page.clone();
         let node_loaded = node_loaded.clone();
         let python_loaded = python_loaded.clone();
         button.connect_clicked(move |_| {
+            if page == Page::Flatpak && !flatpak_loaded.replace(true) {
+                let popup = flatpak_toast.clone();
+                let label = flatpak_label.clone();
+                let sequence = flatpak_sequence.clone();
+                let notice: Rc<dyn Fn(&str, bool)> = Rc::new(move |message, success| {
+                    popup.remove_css_class("toast-success");
+                    popup.remove_css_class("toast-info");
+                    popup.remove_css_class("toast-error");
+                    popup.add_css_class(if success {
+                        "toast-success"
+                    } else {
+                        "toast-error"
+                    });
+                    label.set_text(message);
+                    popup.set_reveal_child(true);
+                    let ticket = sequence.get().wrapping_add(1);
+                    sequence.set(ticket);
+                    let popup = popup.clone();
+                    let sequence = sequence.clone();
+                    glib::timeout_add_local_once(Duration::from_secs(5), move || {
+                        if sequence.get() == ticket {
+                            popup.set_reveal_child(false);
+                        }
+                    });
+                });
+                flatpak_page.append(&flatpak_ui::build(notice));
+            }
             if page == Page::Node && !node_loaded.replace(true) {
                 node_page.append(&node_ui::build());
             }
@@ -593,7 +640,7 @@ fn build_ui(app: &gtk::Application) {
         self_release: None,
         toast,
         toast_label,
-        toast_sequence: Rc::new(Cell::new(0)),
+        toast_sequence,
         entries: vec![],
         busy: false,
     }));
@@ -1875,6 +1922,7 @@ mod ui_tests {
     fn stack_pages_have_unique_names() {
         let ids = [
             Page::Applications.id(),
+            Page::Flatpak.id(),
             Page::Node.id(),
             Page::Python.id(),
             Page::About.id(),
@@ -1882,12 +1930,20 @@ mod ui_tests {
         ];
         assert_eq!(
             ids,
-            ["applications", "node", "python", "about", "changelog"]
+            [
+                "applications",
+                "flatpak",
+                "node",
+                "python",
+                "about",
+                "changelog"
+            ]
         );
         assert_ne!(ids[0], ids[1]);
         assert_ne!(ids[1], ids[2]);
         assert_ne!(ids[2], ids[3]);
         assert_ne!(ids[3], ids[4]);
+        assert_ne!(ids[4], ids[5]);
     }
 
     #[test]
@@ -1982,7 +2038,7 @@ mod navigation_tests {
 
     #[test]
     fn all_header_navigation_icons_use_symbolic_gtk_icons() {
-        assert_eq!(NAV_SYMBOLIC_ICONS.len(), 6);
+        assert_eq!(NAV_SYMBOLIC_ICONS.len(), 7);
         assert!(NAV_SYMBOLIC_ICONS
             .iter()
             .all(|name| name.ends_with("-symbolic")));

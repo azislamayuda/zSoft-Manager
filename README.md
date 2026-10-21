@@ -2,9 +2,9 @@
 
 **zSoft Manager** is a lightweight, native Rust + GTK4 application manager for Ubuntu and related Linux distributions, created by [@azislamayuda](https://github.com/azislamayuda).
 
-**Current release: v0.4.2.1** The public four-part version uses valid Cargo SemVer `0.4.2+1` internally; the GUI, AppImage filename, and GitHub tag use `v0.4.2.1`. — AppImage, NVM-managed Node.js, and Python virtual environment package updates. Updates run only when you request them.
+**Current development version: v0.4.5** — AppImage, Flatpak, NVM-managed Node.js, and Python virtual environment updates. Network checks run only on request.
 
-> The app currently manages **AppImage** files, an **NVM-managed Node.js toolchain**, and a **Python virtual environment**. `.deb`, Flatpak and Snap package management are not yet implemented.
+> The app manages **AppImage**, **Flatpak** (applications and runtimes), **NVM-managed Node.js**, and **Python virtual environment** packages. `.deb` and Snap package management are not implemented.
 
 ## Features
 
@@ -12,13 +12,13 @@
 - On-demand recursive AppImage discovery in **subfolders** of `~/Applications` only. Direct files in `~/Applications` and every `ArtCraft` directory are excluded.
 - GitHub Releases update sources and the official KDE Kdenlive download server.
 - Versionless stable filenames, compatibility symlinks, one-step backup/rollback and size / ELF / publisher SHA256 verification when available.
-- Bottom-center in-window toast notifications for successful saves, scans, updates, failures and rollbacks; no extra windows.
-- Five in-window pages: **AppImage**, **Node.js**, **Python**, **About**, and **Changelog**.
+- Bottom-center in-window toast notifications for successful saves, scans, Flatpak checks/updates, failures and rollbacks; no extra windows.
+- Six in-window pages: **AppImage**, **Flatpak**, **Node.js**, **Python**, **About**, and **Changelog**.
 - **Node.js Toolchain:** inspect NVM, active/default Node, lifecycle status, all installed versions and global npm packages locally; manually check upstream versions and install individual updates.
 - NVM default can be switched explicitly; no automatic deletion of old Node versions, system Node changes, or sudo operations.
 - **Python Environment:** activate/deactivate an environment for in-app operations; inspect Python/pip and top-level packages; manually check `pip list --outdated --not-required`; select packages to upgrade and run `pip check`.
 - Default Python virtual environment: `~/myenv` (configurable, including `/home/myenv`); zSoft Manager does not modify other terminals or the system Python installation.
-- All six header navigation icons use consistent 20 px GTK symbolic line art with 44 px hit targets. Only the active page gets a soft-blue background; inactive buttons remain transparent.
+- All seven header navigation icons use consistent 20 px GTK symbolic line art with 44 px hit targets. Only the active page gets a soft-blue background; inactive buttons remain transparent.
 - GTK4 client-side titlebar with grouped, more compact minimize / maximize / close controls and an updated **Zs monogram** SVG icon.
 - Default window size 1040 × 780 pixels (was 1040 × 720).
 - Header **Update** icon next to Changelog checks [this project's GitHub Releases](https://github.com/azislamayuda/zSoft-Manager/releases) and, after a second click, installs a verified update when running as an AppImage from a managed subfolder.
@@ -98,7 +98,7 @@ bash scripts/build-appimage.sh
 
 On x86_64 Ubuntu, the script downloads an official linuxdeploy binary if not already cached, assembles GTK4-linked components into an AppDir and writes the AppImage + SHA256 file to `dist/`. Runtime portability must still be smoke-tested on the target Ubuntu versions. It is also possible to create a release via the GitHub Actions workflow by pushing a tag, after building and testing locally.
 
-Use GitHub Desktop for **Commit to main** and **Push origin**. Create the tag `v0.4.4` from GitHub's new-release page, rather than using Git CLI.
+Use GitHub Desktop for **Commit to main** and **Push origin**. After tests succeed, create the tag `v0.4.5` from GitHub's new-release page, rather than using Git CLI.
 
 The GitHub Actions `release-appimage.yml` job will test, build, package, and upload the AppImage to GitHub Releases. A Release is required before the self-updater works; an empty repository is not a Release.
 
@@ -108,7 +108,7 @@ The development repository is expected at `/home/lamayuda/ZDATA/ME/GITHUB/zSoft-
 
 ## Previous zAppImage Manager migration
 
-If you already cloned `zSoft-Manager` via GitHub Desktop, **do not run the old migration script again**. Extract the v0.4.4 PATCH into your existing clone. Do not overwrite `.git`. Local Git operations are performed with GitHub Desktop, not the command line.
+If you already cloned `zSoft-Manager` via GitHub Desktop, **do not run the old migration script again**. Extract the v0.4.5 PATCH into your existing clone. Do not overwrite `.git`. Local Git operations are performed with GitHub Desktop, not the command line.
 
 Source configuration reads existing `~/.config/zappimage-manager/sources.json` and state `~/.local/state/zappimage-manager/installed.json` as a fallback, and saves future changes under `zsoft-manager`. Old files remain untouched and existing rollback backups are preserved.
 
@@ -162,3 +162,18 @@ Before packaging: `bash scripts/audit-v044.sh`, then `cargo run --release`. Test
 ### Matching manually installed versionless AppImages (v0.4.4)
 
 On-demand GitHub update checks compare publisher SHA256 digests **and** published `.AppImage.sha256` sidecars to the bytes in a local renamed AppImage. When they match, status is **Up to date**, with no reinstall. If a checksum is unavailable or does not match, zSoft Manager will not guess: use **Set local version** after checking the version in the installed application's About window. Such an assertion is recorded against the exact local file SHA256 and repository; a replaced AppImage or changed repository invalidates it. Its status is marked **User-confirmed** rather than publisher-verified. Once current, the row displays a disabled **Up to date** check action; **Edit local version** is available from **Source** if a user-confirmation was saved and the release has been checked. If an older version is recorded, **Install update** remains available. No automatic background checks, reinstalls or downloads occur.
+
+## Flatpak Manager (v0.4.5)
+
+The **Flatpak** header icon is located immediately after AppImage. It opens a dedicated page with separate **Applications** and **Runtimes** views. Flatpak data is loaded only when this page is opened.
+
+- **Rescan** reads local user/system Flatpak installations only. No network access.
+- **Check updates** queries configured Flatpak remotes for installed/available versions, commits, branches and architectures. Remote update status is authoritative even if version strings are equal or missing.
+- **Select all / Clear** control which available refs are selected. **Update selected** only updates chosen refs; **Update all** applies to all available refs in the visible tab (Applications or Runtimes).
+- The UI shows name, application ID, scope, origin, installed version, latest remote version (if advertised), and update status. A missing remote version is shown as unknown, never fabricated.
+- User and system installations are explicitly separated. System updates may require an authorization dialog via Flatpak/Polkit. **Never launch zSoft Manager as root.**
+- All Flatpak operations use argv-only subprocess calls, in worker threads, with no shell interpolation or daemon. The GUI reports progress per ref and errors without hanging.
+- Requires the `flatpak` CLI installed and configured remotes (e.g. Flathub). If missing, this page shows an error without disrupting AppImage/Node/Python.
+- v0.4.5 handles the standard `--user` and `--system` installations. Named additional system installations are not yet managed by this page.
+
+For manual diagnostics: `flatpak list --app`, `flatpak list --runtime`, and `flatpak remote-ls --updates`.

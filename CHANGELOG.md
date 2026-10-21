@@ -2,6 +2,38 @@
 
 All notable changes to this project are recorded here. Format follows Keep a Changelog.
 
+## [0.4.5] - 2026-10-21 (Development)
+
+### Node.js cleanup (pre-release improvement)
+- Add **Remove old** next to a Node version only when a newer version of the same major line is installed (e.g. keep v26.12.1 while optionally removing v26.12.0).
+- For Current updates within the same major, migrate global npm packages with `--reinstall-packages-from` before cleanup, matching the previous `znode.sh` workflow.
+- Ask for explicit confirmation before calling `nvm uninstall`; explain that version-specific global npm packages are deleted.
+- Recheck NVM default/active version and availability of a newer same-major version immediately before uninstalling. Do not remove unrelated major lines, change the saved default alias, or touch system Node.js.
+- Refresh the Node.js list after a successful removal. Add offline regression tests for cleanup candidate safety.
+- Correct the v0.4.5 About version assertion from the earlier development patch.
+
+### Flatpak UI compile fix
+- Fixed invalid `ScanMessage::Finished` enum declaration in the Flatpak UI that prevented Rust formatting and compilation.
+
+### Added
+
+- New Flatpak icon immediately after AppImage in the top navigation, with a dedicated GTK4 Flatpak Manager page. The page is lazy-initialized only when opened.
+- Separate Applications and Runtimes views for Flatpak user/system installations.
+- Installed app/runtime discovery, installed versions and remote versions (when available), branch, origin, and per-ref update status.
+- On-demand check of configured Flatpak remotes, selective updates, Update all, and per-ref progress/error feedback.
+- Explicit separation of user/system Flatpak update operations and Flatpak/Polkit authorization without elevated GUI privileges.
+- Offline Rust regression tests for local/remote output parsing, correct ref/architecture matching, equal-version updates, scope isolation, missing remotes and malformed output.
+
+### Safety and compatibility
+
+- Updates are determined by Flatpak's ref update availability, **not solely by version strings**.
+- Failed remote checks are never mislabeled Up to date. Commands do not invoke shell or sudo and are run off the GTK main thread.
+- No background polling or Flatpak subprocess at application startup. Existing AppImage, Node.js, Python, checksum/rollback and self-update functionality preserved.
+
+### Testing
+
+- Ubuntu `cargo test`, `cargo check --release` and live GUI checks required before final AppImage release.
+
 ## [0.4.4] - 2026-10-21
 
 ### Added

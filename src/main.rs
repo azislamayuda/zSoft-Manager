@@ -1,4 +1,6 @@
 mod config;
+mod flatpak;
+mod flatpak_ui;
 mod info;
 mod naming;
 mod node;

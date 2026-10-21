@@ -203,8 +203,17 @@ fn bash(script: &str, target: Option<&str>) -> Result<String, String> {
         .output()
         .map_err(|e| format!("Unable to start Bash: {e}"))?;
     if !output.status.success() {
-        let err = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("Command failed: {}", err.trim()));
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let detail = if !stderr.trim().is_empty() {
+            stderr.trim()
+        } else if !stdout.trim().is_empty() {
+            stdout.trim()
+        } else {
+            "NVM returned a failure without diagnostic output"
+        };
+        let detail = detail.chars().take(1500).collect::<String>();
+        return Err(format!("Command failed ({}): {detail}", output.status));
     }
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
@@ -298,6 +307,89 @@ pub fn installed_node_versions(
             version,
         })
         .collect()
+}
+
+/// Suggest cleanup only when a newer patch/minor of the same Node major is installed.
+/// Never suggest removing the Node selected by the current NVM default alias or
+/// the Node active in the application's isolated NVM shell.
+pub fn old_node_cleanup_candidate(
+    installed: &[InstalledNode],
+    target: &str,
+    default: Option<&str>,
+    active: Option<&str>,
+) -> bool {
+    let Some(target_parts) = numbers(target) else {
+        return false;
+    };
+    if !target.starts_with('v') || Some(target) == default || Some(target) == active {
+        return false;
+    }
+    installed.iter().any(|other| {
+        numbers(&other.version)
+            .is_some_and(|candidate| candidate[0] == target_parts[0] && candidate > target_parts)
+    })
+}
+
+/// Only uninstall a superseded NVM-managed version. This deliberately does not
+/// remove a whole major line, EOL versions, or system Node installations.
+/// Existing terminals and global npm packages in the removed version may be affected.
+pub fn remove_old_node_version(version: &str) -> Result<String, String> {
+    if !version.starts_with('v') || numbers(version).is_none() {
+        return Err("Invalid NVM Node.js version; removal cancelled".into());
+    }
+    let dir = nvm_dir();
+    if !dir.join("nvm.sh").is_file() {
+        return Err("NVM is unavailable; removal cancelled".into());
+    }
+    let installed =
+        installed_node_versions(&dir.join("versions/node"), &ReleaseSchedule::default(), "");
+    if !old_node_cleanup_candidate(&installed, version, None, None) {
+        return Err(
+            "No newer installed Node.js release of the same major version; removal cancelled"
+                .into(),
+        );
+    }
+    // A second, live safety check occurs inside the NVM subprocess just before
+    // deleting anything, including resolving the current default alias.
+    const REMOVE_OLD: &str = r#"
+set -eo pipefail
+export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+. "$NVM_DIR/nvm.sh" --no-use
+target="$1"
+[[ "$target" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Invalid Node.js version' >&2; exit 1; }
+[ -f "$NVM_DIR/versions/node/$target/bin/node" ] || { echo 'Target is not an installed NVM Node.js version' >&2; exit 1; }
+resolved_default="$(nvm version default 2>/dev/null || true)"
+if [ "$resolved_default" = "$target" ]; then
+    echo 'Refusing to remove the NVM default version' >&2
+    exit 1
+fi
+# This app activates NVM default in its isolated inspection shell.
+# Ignore the inherited terminal PATH here: it can still point at the old
+# version even when zSoft Manager uses the newer NVM default. Existing open
+# terminals are warned in the UI before uninstall.
+# Recheck there is still a newer version in this major line immediately before deletion.
+major="${target#v}"
+major="${major%%.*}"
+newer_found=0
+for candidate_dir in "$NVM_DIR"/versions/node/v"$major".*; do
+    [ -f "$candidate_dir/bin/node" ] || continue
+    candidate="${candidate_dir##*/}"
+    [[ "$candidate" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || continue
+    if [ "$candidate" != "$target" ] && [ "$(printf '%s\n' "$target" "$candidate" | sort -V | tail -n 1)" = "$candidate" ]; then
+        newer_found=1
+        break
+    fi
+done
+[ "$newer_found" -eq 1 ] || { echo 'No newer same-major Node.js remains installed' >&2; exit 1; }
+# All changes are isolated to this short-lived Bash process.
+# NVM cannot uninstall a version currently selected by the subprocess.
+nvm use default >/dev/null 2>&1 || { echo 'Could not safely select NVM default' >&2; exit 1; }
+# Check the Node actually active in the subprocess that performs uninstall.
+[ "$(nvm current 2>/dev/null || true)" != "$target" ] || { echo 'Target still active after selecting default; removal refused' >&2; exit 1; }
+nvm uninstall "$target"
+"#;
+    bash(REMOVE_OLD, Some(version))?;
+    Ok(format!("Removed old Node.js {version} using NVM. Its version-specific global npm packages were also removed."))
 }
 
 pub fn valid_global_package(name: &str) -> bool {
@@ -601,7 +693,17 @@ set -eo pipefail
 export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
 . "$NVM_DIR/nvm.sh" --no-use
 old_default="$(cat "$NVM_DIR/alias/default" 2>/dev/null || true)"
-nvm install "$1"
+previous="$(nvm version node 2>/dev/null || true)"
+previous_major="${previous#v}"
+previous_major="${previous_major%%.*}"
+target_major="${1#v}"
+target_major="${target_major%%.*}"
+if [[ "$previous" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] && [ "$previous_major" = "$target_major" ] && [ "$previous" != "$1" ]; then
+    # Keep global npm packages before optionally removing the superseded version.
+    nvm install "$1" --reinstall-packages-from="$previous"
+else
+    nvm install "$1"
+fi
 if [ -n "$old_default" ]; then nvm alias default "$old_default"; fi
 "#;
     let script = match which {
@@ -714,6 +816,41 @@ mod tests {
         assert!(valid_global_package("@scope/tool"));
         assert!(!valid_global_package("--global"));
         assert!(!valid_global_package("a/b/c"));
+    }
+
+    #[test]
+    fn node_cleanup_only_offers_older_same_major_versions() {
+        let entries = ["v26.12.1", "v26.12.0", "v24.22.1", "v24.22.0", "v22.14.0"]
+            .into_iter()
+            .map(|version| InstalledNode {
+                version: version.into(),
+                phase: NodePhase::Unknown,
+            })
+            .collect::<Vec<_>>();
+        let candidate =
+            |name, default, active| old_node_cleanup_candidate(&entries, name, default, active);
+        assert!(candidate("v26.12.0", Some("v24.22.1"), Some("v24.22.1")));
+        assert!(candidate("v24.22.0", Some("v24.22.1"), Some("v24.22.1")));
+        assert!(!candidate("v26.12.1", Some("v24.22.1"), Some("v24.22.1")));
+        assert!(!candidate("v24.22.1", Some("v24.22.1"), Some("v24.22.1")));
+        assert!(!candidate("v22.14.0", Some("v24.22.1"), Some("v24.22.1")));
+        assert!(!candidate("v26.12.0", Some("v26.12.0"), None));
+        assert!(!candidate("v24.22.0", None, Some("v24.22.0")));
+        assert!(!candidate("../v26.12.0", None, None));
+    }
+
+    #[test]
+    fn node_cleanup_never_targets_the_older_major_just_because_it_is_eol() {
+        let entries = ["v26.12.1", "v24.22.1", "v22.14.0"]
+            .into_iter()
+            .map(|version| InstalledNode {
+                version: version.into(),
+                phase: NodePhase::Eol,
+            })
+            .collect::<Vec<_>>();
+        assert!(!old_node_cleanup_candidate(
+            &entries, "v22.14.0", None, None
+        ));
     }
 
     #[test]
