@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1254 1254" role="img" aria-label="zSoft Manager Zs monogram icon">
+  <title>zSoft Manager — Zs fused monogram</title>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1" gradientUnits="objectBoundingBox">
+      <stop offset="0" stop-color="#2FDBF3"/>
+      <stop offset=".38" stop-color="#006BFA"/>
+      <stop offset=".72" stop-color="#0635C5"/>
+      <stop offset="1" stop-color="#001B73"/>
+    </linearGradient>
+    <linearGradient id="upper" x1="0" y1="0" x2="1" y2="1" gradientUnits="objectBoundingBox">
+      <stop offset="0" stop-color="#1EA7FF"/>
+      <stop offset=".46" stop-color="#045EF5"/>
+      <stop offset="1" stop-color="#0033C8"/>
+    </linearGradient>
+    <linearGradient id="bottom" x1="0" y1="0" x2=".95" y2="1" gradientUnits="objectBoundingBox">
+      <stop offset="0" stop-color="#0D77FF"/>
+      <stop offset=".52" stop-color="#064BE2"/>
+      <stop offset="1" stop-color="#001875"/>
+    </linearGradient>
+    <linearGradient id="zWhite" x1="0" y1="0" x2=".75" y2="1" gradientUnits="objectBoundingBox">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset=".63" stop-color="#FEFFFF"/>
+      <stop offset="1" stop-color="#CDE9FF"/>
+    </linearGradient>
+    <linearGradient id="sCyan" x1="0" y1="0" x2="1" y2="1" gradientUnits="objectBoundingBox">
+      <stop offset="0" stop-color="#94F2FF"/>
+      <stop offset=".48" stop-color="#78E9FB"/>
+      <stop offset="1" stop-color="#20C6F8"/>
+    </linearGradient>
+    <clipPath id="rounded"><path d="M316 3 H936 C1112 3 1247 139 1247 315 V939 C1247 1113 1111 1245 937 1245 H316 C141 1245 6 1112 6 938 V314 C6 138 140 3 316 3 Z"/></clipPath>
+    <clipPath id="glyph"><path d="M 281,312 L 274,322 L 266,341 L 246,424 L 246,434 L 248,439 L 255,446 L 263,449 L 586,449 L 588,451 L 588,459 L 307,732 L 236,803 L 225,817 L 210,847 L 206,865 L 206,887 L 209,900 L 215,914 L 224,927 L 236,938 L 248,945 L 268,951 L 928,951 L 958,945 L 965,941 L 971,940 L 975,936 L 979,936 L 986,933 L 986,931 L 983,929 L 983,920 L 993,911 L 996,910 L 996,905 L 1016,883 L 1026,883 L 1028,885 L 1029,882 L 1035,878 L 1042,853 L 1043,831 L 1040,810 L 1035,794 L 1027,778 L 1017,764 L 1003,750 L 985,737 L 965,727 L 945,720 L 908,712 L 830,703 L 813,697 L 805,690 L 803,686 L 803,672 L 810,663 L 819,658 L 836,654 L 879,654 L 899,656 L 928,662 L 946,668 L 956,673 L 963,672 L 1014,611 L 1017,606 L 1017,602 L 1013,597 L 1006,592 L 981,579 L 960,572 L 935,567 L 824,566 L 794,570 L 763,579 L 736,592 L 712,609 L 695,626 L 685,640 L 678,654 L 673,672 L 673,695 L 679,716 L 691,736 L 705,750 L 719,760 L 732,767 L 764,779 L 803,788 L 876,800 L 890,804 L 901,809 L 913,820 L 915,824 L 915,839 L 911,846 L 900,855 L 889,859 L 877,861 L 857,861 L 838,858 L 802,846 L 748,819 L 724,812 L 695,808 L 483,808 L 481,806 L 482,796 L 615,668 L 695,593 L 880,426 L 896,410 L 905,398 L 915,379 L 919,367 L 922,346 L 921,332 L 916,314 L 909,302 L 900,292 L 883,282 L 870,279 L 344,279 L 324,283 L 306,291 L 293,300 Z"/></clipPath>
+    <linearGradient id="barTransition" x1="425" y1="850" x2="1040" y2="850" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#E8F4FF"/>
+      <stop offset=".42" stop-color="#D4F0FF"/>
+      <stop offset="1" stop-color="#39D7FF"/>
+    </linearGradient>
+  </defs>
+  <g clip-path="url(#rounded)">
+    <path fill="url(#background)" d="M0 0 H1254 V1254 H0Z"/>
+    <!-- Soft blue curves remain flat and vector-based. -->
+    <path fill="url(#upper)" opacity=".65" d="M806 0 H1254 V694 C1095 719 1020 776 925 854 C738 1028 590 1126 361 1254 H0 V790 C171 546 369 512 517 308 C622 163 714 56 806 0 Z"/>
+    <path fill="#38C7FA" opacity=".19" d="M0 0 H805 C687 91 597 224 537 279 C408 422 235 479 0 787 Z"/>
+    <path fill="url(#bottom)" opacity=".55" d="M0 940 C215 968 341 914 526 985 C689 1043 813 1050 944 927 C1062 819 1123 740 1254 693 V1254 H0Z"/>
+    <path fill="#00339F" opacity=".2" d="M630 1254 C717 1065 899 871 1065 754 C1114 722 1172 704 1254 686 V1254 Z"/>
+    <!-- Monogram is outlined as SVG geometry, not embedded bitmap or live text. -->
+    <path d="M 281,312 L 274,322 L 266,341 L 246,424 L 246,434 L 248,439 L 255,446 L 263,449 L 586,449 L 588,451 L 588,459 L 307,732 L 236,803 L 225,817 L 210,847 L 206,865 L 206,887 L 209,900 L 215,914 L 224,927 L 236,938 L 248,945 L 268,951 L 928,951 L 958,945 L 965,941 L 971,940 L 975,936 L 979,936 L 986,933 L 986,931 L 983,929 L 983,920 L 993,911 L 996,910 L 996,905 L 1016,883 L 1026,883 L 1028,885 L 1029,882 L 1035,878 L 1042,853 L 1043,831 L 1040,810 L 1035,794 L 1027,778 L 1017,764 L 1003,750 L 985,737 L 965,727 L 945,720 L 908,712 L 830,703 L 813,697 L 805,690 L 803,686 L 803,672 L 810,663 L 819,658 L 836,654 L 879,654 L 899,656 L 928,662 L 946,668 L 956,673 L 963,672 L 1014,611 L 1017,606 L 1017,602 L 1013,597 L 1006,592 L 981,579 L 960,572 L 935,567 L 824,566 L 794,570 L 763,579 L 736,592 L 712,609 L 695,626 L 685,640 L 678,654 L 673,672 L 673,695 L 679,716 L 691,736 L 705,750 L 719,760 L 732,767 L 764,779 L 803,788 L 876,800 L 890,804 L 901,809 L 913,820 L 915,824 L 915,839 L 911,846 L 900,855 L 889,859 L 877,861 L 857,861 L 838,858 L 802,846 L 748,819 L 724,812 L 695,808 L 483,808 L 481,806 L 482,796 L 615,668 L 695,593 L 880,426 L 896,410 L 905,398 L 915,379 L 919,367 L 922,346 L 921,332 L 916,314 L 909,302 L 900,292 L 883,282 L 870,279 L 344,279 L 324,283 L 306,291 L 293,300 Z" fill="url(#zWhite)"/>
+    <path d="M 725,599 L 712,609 L 691,631 L 680,649 L 673,672 L 674,700 L 678,714 L 691,736 L 710,754 L 724,763 L 746,773 L 788,785 L 861,797 L 880,801 L 895,806 L 904,811 L 913,820 L 916,828 L 916,835 L 913,843 L 906,851 L 898,856 L 877,861 L 857,861 L 834,857 L 812,850 L 791,840 L 790,844 L 785,849 L 777,852 L 740,886 L 738,891 L 730,901 L 729,905 L 711,928 L 710,942 L 708,944 L 708,948 L 716,951 L 929,951 L 955,946 L 972,940 L 988,932 L 989,927 L 993,925 L 993,919 L 999,916 L 1006,908 L 1006,903 L 1010,901 L 1016,893 L 1018,892 L 1027,893 L 1029,891 L 1030,882 L 1035,878 L 1041,858 L 1043,842 L 1041,814 L 1032,787 L 1021,769 L 998,746 L 985,737 L 965,727 L 942,719 L 914,713 L 870,707 L 844,705 L 822,701 L 813,697 L 805,690 L 802,684 L 802,675 L 807,666 L 813,661 L 822,657 L 837,654 L 878,654 L 905,657 L 928,662 L 946,668 L 956,673 L 962,673 L 1017,607 L 1016,600 L 1001,589 L 976,577 L 952,570 L 925,566 L 824,566 L 805,568 L 785,572 L 763,579 L 743,588 Z" fill="url(#sCyan)"/>
+    <g clip-path="url(#glyph)"><path d="M472 804 H1080 V960 H315 Z" fill="url(#barTransition)"/></g>
+  </g>
+</svg>

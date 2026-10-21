@@ -1,0 +1,57 @@
+# ================================================================
+# zSoft Manager - Git ignore rules
+# Rust + GTK4 + AppImage (Ubuntu/Linux)
+# ================================================================
+
+# Rust / Cargo compilation output
+/target/
+
+# Generated AppImage packaging directories and downloaded build tools
+# Example: build/zSoftManager.AppDir/usr/lib/*.so
+/build/
+/dist/
+/out/
+
+# Locally generated release packages (publish via GitHub Releases)
+*.AppImage
+*.AppImage.zsync
+*.AppImage.sha256
+*.deb
+*.rpm
+
+# Temporary downloads, runtime logs, and throwaway files
+*.part
+*.partial
+*.download
+*.tmp
+*.temp
+*.log
+*.bak
+*.backup
+/tmp/
+/temp/
+
+# Local credentials/configuration - never commit real secrets
+.env
+.env.*
+!.env.example
+!.env.sample
+*.pem
+*.p12
+*.pfx
+
+# Developer-specific editor settings
+/.vscode/
+/.idea/
+*.swp
+*.swo
+*~
+
+# Operating system-generated files
+.DS_Store
+Thumbs.db
+.directory
+
+# IMPORTANT: Keep the following in Git (do not ignore):
+# Cargo.toml, Cargo.lock, src/, assets/, scripts/, packaging/,
+# .github/workflows/, README.md, CHANGELOG.md, LICENSE
