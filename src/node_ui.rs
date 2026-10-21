@@ -1,6 +1,6 @@
-//! Native GTK4 Node.js tools page. Local inspection runs on page creation;
-//! network version checks and installations happen only on button clicks.
-use crate::node::{self, Install, Versions};
+//! Native GTK4 Node.js management page. No extra window or background daemon.
+//! Only the Check updates button accesses remote services.
+use crate::node::{self, Install, NodePhase, Versions};
 use gtk::{glib, prelude::*};
 use std::{cell::RefCell, rc::Rc, sync::mpsc, thread, time::Duration};
 
@@ -10,32 +10,33 @@ struct ToolRow {
     available: gtk::Label,
     action: gtk::Button,
 }
-
 struct Ui {
     status: gtk::Label,
     active: gtk::Label,
+    phase: gtk::Label,
     path: gtk::Label,
+    default_node: gtk::Label,
     refresh: gtk::Button,
     check: gtk::Button,
     nvm: ToolRow,
     lts: ToolRow,
     npm: ToolRow,
     current: ToolRow,
+    installed_rows: gtk::Box,
+    global_rows: gtk::Box,
     versions: Versions,
     busy: bool,
 }
-
-fn action(label: &str, icon_name: &str, css: &str) -> gtk::Button {
-    let b = gtk::Button::new();
-    b.add_css_class(css);
-    let h = gtk::Box::new(gtk::Orientation::Horizontal, 7);
-    h.set_halign(gtk::Align::Center);
-    h.append(&gtk::Image::from_icon_name(icon_name));
-    h.append(&gtk::Label::new(Some(label)));
-    b.set_child(Some(&h));
-    b
+fn action(label: &str, icon: &str, css: &str) -> gtk::Button {
+    let button = gtk::Button::new();
+    button.add_css_class(css);
+    let content = gtk::Box::new(gtk::Orientation::Horizontal, 7);
+    content.set_halign(gtk::Align::Center);
+    content.append(&gtk::Image::from_icon_name(icon));
+    content.append(&gtk::Label::new(Some(label)));
+    button.set_child(Some(&content));
+    button
 }
-
 fn tool_row(parent: &gtk::Box, title: &str, subtitle: &str) -> ToolRow {
     let card = gtk::Box::new(gtk::Orientation::Horizontal, 12);
     card.add_css_class("node-card");
@@ -54,7 +55,7 @@ fn tool_row(parent: &gtk::Box, title: &str, subtitle: &str) -> ToolRow {
     installed.set_xalign(0.0);
     installed.add_css_class("node-version");
     left.append(&installed);
-    let available = gtk::Label::new(Some("Latest: Check updates to find out"));
+    let available = gtk::Label::new(Some("Latest: Click Check updates"));
     available.set_xalign(0.0);
     available.add_css_class("node-latest");
     left.append(&available);
@@ -74,24 +75,36 @@ fn tool_row(parent: &gtk::Box, title: &str, subtitle: &str) -> ToolRow {
         action: update,
     }
 }
-
+fn section_title(parent: &gtk::Box, heading: &str, desc: &str) {
+    let name = gtk::Label::new(Some(heading));
+    name.add_css_class("node-section-heading");
+    name.set_xalign(0.0);
+    name.set_margin_top(12);
+    parent.append(&name);
+    let hint = gtk::Label::new(Some(desc));
+    hint.set_xalign(0.0);
+    hint.set_wrap(true);
+    hint.add_css_class("pathline");
+    parent.append(&hint);
+}
+fn plain_text(text: &str, css: &str) -> gtk::Label {
+    let label = gtk::Label::new(Some(text));
+    label.set_xalign(0.0);
+    label.set_wrap(true);
+    label.add_css_class(css);
+    label
+}
 pub fn build() -> gtk::Box {
     let page = gtk::Box::new(gtk::Orientation::Vertical, 14);
     page.add_css_class("page");
     let header = gtk::Box::new(gtk::Orientation::Horizontal, 12);
     let title_column = gtk::Box::new(gtk::Orientation::Vertical, 3);
     title_column.set_hexpand(true);
-    let heading = gtk::Label::new(Some("Node.js Toolchain"));
-    heading.set_xalign(0.0);
-    heading.add_css_class("page-heading");
-    title_column.append(&heading);
-    let description = gtk::Label::new(Some(
-        "Manage NVM, Node.js LTS, npm and optional Node.js Current. No automatic cleanup.",
+    title_column.append(&plain_text("Node.js Toolchain", "page-heading"));
+    title_column.append(&plain_text(
+        "Manage NVM, Node.js versions and global npm packages. Updates are always manual.",
+        "subline",
     ));
-    description.set_xalign(0.0);
-    description.set_wrap(true);
-    description.add_css_class("subline");
-    title_column.append(&description);
     header.append(&title_column);
     let refresh = action("Refresh installed", "view-refresh-symbolic", "flat-button");
     refresh.set_valign(gtk::Align::Center);
@@ -101,17 +114,20 @@ pub fn build() -> gtk::Box {
     header.append(&check);
     page.append(&header);
 
-    let summary = gtk::Box::new(gtk::Orientation::Vertical, 5);
+    let summary = gtk::Box::new(gtk::Orientation::Vertical, 7);
     summary.add_css_class("node-summary");
-    let active = gtk::Label::new(Some("Active Node: Checking…"));
-    active.set_xalign(0.0);
-    active.add_css_class("file-title");
-    summary.append(&active);
-    let path = gtk::Label::new(Some("Node path: Checking…"));
-    path.set_xalign(0.0);
+    let active_line = gtk::Box::new(gtk::Orientation::Horizontal, 10);
+    let active = plain_text("Active Node: Checking…", "file-title");
+    active.set_hexpand(true);
+    active_line.append(&active);
+    let phase = plain_text("Unknown", "node-phase-badge");
+    active_line.append(&phase);
+    summary.append(&active_line);
+    let default_node = plain_text("NVM default: Checking…", "node-version");
+    summary.append(&default_node);
+    let path = plain_text("Node path: Checking…", "pathline");
     path.set_selectable(true);
     path.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
-    path.add_css_class("pathline");
     summary.append(&path);
     page.append(&summary);
 
@@ -123,7 +139,7 @@ pub fn build() -> gtk::Box {
     let lts = tool_row(
         &cards,
         "Node.js LTS",
-        "Recommended stable release; retained as your default",
+        "Recommended supported release; update sets LTS as default",
     );
     let npm = tool_row(
         &cards,
@@ -135,26 +151,34 @@ pub fn build() -> gtk::Box {
         "Node.js Current",
         "Optional; installed only after an explicit click",
     );
+    section_title(&cards, "Installed Node.js versions", "Choose Set default to change NVM's default for new shells. Already-open terminals do not change.");
+    let installed_rows = gtk::Box::new(gtk::Orientation::Vertical, 7);
+    cards.append(&installed_rows);
+    section_title(&cards, "Global npm packages", "Installed with the default NVM Node. Check updates first, then update packages individually.");
+    let global_rows = gtk::Box::new(gtk::Orientation::Vertical, 7);
+    cards.append(&global_rows);
     scroller.set_child(Some(&cards));
     page.append(&scroller);
-    let status = gtk::Label::new(Some(
-        "Checking locally installed tools. Remote checks are manual.",
-    ));
-    status.set_xalign(0.0);
-    status.set_wrap(true);
-    status.add_css_class("node-status");
+    let status = plain_text(
+        "Reading local Node.js tools. Remote checks are manual.",
+        "node-status",
+    );
     page.append(&status);
 
     let model = Rc::new(RefCell::new(Ui {
         status,
         active,
+        phase,
         path,
+        default_node,
         refresh: refresh.clone(),
         check: check.clone(),
         nvm,
         lts,
         npm,
         current,
+        installed_rows,
+        global_rows,
         versions: Versions::default(),
         busy: false,
     }));
@@ -178,11 +202,9 @@ pub fn build() -> gtk::Box {
     probe(&model, false);
     page
 }
-
 fn show_value(value: Option<&str>) -> &str {
     value.unwrap_or("Not installed / unavailable")
 }
-
 fn set_row(row: &ToolRow, local: Option<&str>, latest: Option<&str>, enabled: bool) {
     row.installed
         .set_text(&format!("Installed: {}", show_value(local)));
@@ -208,49 +230,169 @@ fn set_row(row: &ToolRow, local: Option<&str>, latest: Option<&str>, enabled: bo
         }
     }
 }
-
+fn clear(parent: &gtk::Box) {
+    while let Some(child) = parent.first_child() {
+        parent.remove(&child);
+    }
+}
+fn make_badge(phase: &NodePhase) -> gtk::Label {
+    let badge = plain_text(phase.label(), "node-phase-badge");
+    badge.add_css_class(phase.css());
+    badge.set_tooltip_text(Some(&phase.detail()));
+    badge
+}
 fn update(model: &Rc<RefCell<Ui>>) {
-    let m = model.borrow();
-    let v = &m.versions;
-    m.refresh.set_sensitive(!m.busy);
-    m.check.set_sensitive(!m.busy);
-    m.active.set_text(&format!(
-        "Active Node: {}",
-        show_value(v.node_active.as_deref())
-    ));
-    m.path.set_text(&format!(
-        "Node path: {}",
-        show_value(v.node_path.as_deref())
-    ));
-    set_row(
-        &m.nvm,
-        v.nvm.as_deref(),
-        v.nvm_latest.as_deref(),
-        !m.busy && v.nvm_git_checkout && node::newer(v.nvm.as_deref(), v.nvm_latest.as_deref()),
-    );
-    set_row(
-        &m.lts,
-        v.lts.as_deref(),
-        v.lts_latest.as_deref(),
-        !m.busy && v.nvm_available && node::newer(v.lts.as_deref(), v.lts_latest.as_deref()),
-    );
-    set_row(
-        &m.npm,
-        v.npm.as_deref(),
-        v.npm_latest.as_deref(),
-        !m.busy
-            && v.nvm_available
-            && v.lts.is_some()
-            && node::newer(v.npm.as_deref(), v.npm_latest.as_deref()),
-    );
-    set_row(
-        &m.current,
-        v.current.as_deref(),
-        v.current_latest.as_deref(),
-        !m.busy
-            && v.nvm_available
-            && node::newer(v.current.as_deref(), v.current_latest.as_deref()),
-    );
+    let (v, busy, installed_rows, global_rows) = {
+        let m = model.borrow();
+        let v = m.versions.clone();
+        m.refresh.set_sensitive(!m.busy);
+        m.check.set_sensitive(!m.busy);
+        m.active.set_text(&format!(
+            "Active Node: {}",
+            show_value(v.node_active.as_deref())
+        ));
+        m.path.set_text(&format!(
+            "Node path: {}",
+            show_value(v.node_path.as_deref())
+        ));
+        m.default_node.set_text(&format!(
+            "NVM default: {}{}",
+            show_value(v.default_node.as_deref()),
+            v.default_alias
+                .as_deref()
+                .map(|s| format!(" (alias: {s})"))
+                .unwrap_or_default()
+        ));
+        let phase = v
+            .schedule
+            .classify(v.node_active.as_deref().unwrap_or(""), &v.checked_on);
+        m.phase.set_text(phase.label());
+        for css in [
+            "node-badge-lts",
+            "node-badge-current",
+            "node-badge-eol",
+            "node-badge-unknown",
+        ] {
+            m.phase.remove_css_class(css);
+        }
+        m.phase.add_css_class(phase.css());
+        m.phase.set_tooltip_text(Some(&phase.detail()));
+        set_row(
+            &m.nvm,
+            v.nvm.as_deref(),
+            v.nvm_latest.as_deref(),
+            !m.busy && v.nvm_git_checkout && node::newer(v.nvm.as_deref(), v.nvm_latest.as_deref()),
+        );
+        set_row(
+            &m.lts,
+            v.lts.as_deref(),
+            v.lts_latest.as_deref(),
+            !m.busy && v.nvm_available && node::newer(v.lts.as_deref(), v.lts_latest.as_deref()),
+        );
+        set_row(
+            &m.npm,
+            v.npm.as_deref(),
+            v.npm_latest.as_deref(),
+            !m.busy
+                && v.nvm_available
+                && v.lts.is_some()
+                && node::newer(v.npm.as_deref(), v.npm_latest.as_deref()),
+        );
+        set_row(
+            &m.current,
+            v.current.as_deref(),
+            v.current_latest.as_deref(),
+            !m.busy
+                && v.nvm_available
+                && node::newer(v.current.as_deref(), v.current_latest.as_deref()),
+        );
+        (v, m.busy, m.installed_rows.clone(), m.global_rows.clone())
+    };
+    clear(&installed_rows);
+    if v.installed_nodes.is_empty() {
+        installed_rows.append(&plain_text(
+            "No NVM-managed Node.js versions found.",
+            "node-empty",
+        ));
+    }
+    for entry in &v.installed_nodes {
+        let line = gtk::Box::new(gtk::Orientation::Horizontal, 11);
+        line.add_css_class("node-minicard");
+        let title = gtk::Box::new(gtk::Orientation::Vertical, 3);
+        title.set_hexpand(true);
+        let default = v.default_node.as_deref() == Some(entry.version.as_str());
+        let selected = v.node_active.as_deref() == Some(entry.version.as_str());
+        let mut title_text = entry.version.clone();
+        if default {
+            title_text.push_str(" · Default");
+        }
+        if selected {
+            title_text.push_str(" · Active in app");
+        }
+        title.append(&plain_text(&title_text, "node-version"));
+        title.append(&plain_text(&entry.phase.detail(), "pathline"));
+        line.append(&title);
+        line.append(&make_badge(&entry.phase));
+        let switch = action(
+            if default { "Default" } else { "Set default" },
+            "emblem-default-symbolic",
+            "flat-button",
+        );
+        switch.set_sensitive(!busy && v.nvm_available && !default);
+        switch.set_valign(gtk::Align::Center);
+        let version = entry.version.clone();
+        let model = model.clone();
+        switch.connect_clicked(move |_| set_default(&model, version.clone()));
+        line.append(&switch);
+        installed_rows.append(&line);
+    }
+    clear(&global_rows);
+    if v.global_packages.is_empty() {
+        global_rows.append(&plain_text(
+            "No global npm packages found for the default NVM Node.",
+            "node-empty",
+        ));
+    }
+    for pkg in &v.global_packages {
+        let line = gtk::Box::new(gtk::Orientation::Horizontal, 11);
+        line.add_css_class("node-minicard");
+        let detail = gtk::Box::new(gtk::Orientation::Vertical, 3);
+        detail.set_hexpand(true);
+        detail.append(&plain_text(&pkg.name, "file-title"));
+        detail.append(&plain_text(
+            &format!(
+                "Installed: {}  ·  Latest: {}",
+                pkg.installed,
+                if v.global_updates_checked {
+                    pkg.latest.as_deref().unwrap_or("Up to date")
+                } else {
+                    "Not checked"
+                }
+            ),
+            "pathline",
+        ));
+        line.append(&detail);
+        let available = pkg.latest.is_some() && pkg.name != "npm";
+        let button = action(
+            if pkg.name == "npm" {
+                "Use npm updater"
+            } else {
+                "Update"
+            },
+            "software-update-available-symbolic",
+            "soft-button",
+        );
+        button.set_sensitive(!busy && v.nvm_available && available);
+        button.set_valign(gtk::Align::Center);
+        if pkg.name == "npm" {
+            button.set_tooltip_text(Some("Use the dedicated npm update button above"));
+        }
+        let name = pkg.name.clone();
+        let model = model.clone();
+        button.connect_clicked(move |_| update_package(&model, name.clone()));
+        line.append(&button);
+        global_rows.append(&line);
+    }
 }
 
 fn probe(model: &Rc<RefCell<Ui>>, remote: bool) {
@@ -261,9 +403,9 @@ fn probe(model: &Rc<RefCell<Ui>>, remote: bool) {
         let mut m = model.borrow_mut();
         m.busy = true;
         m.status.set_text(if remote {
-            "Checking official upstream versions…"
+            "Checking official Node.js, NVM and npm sources…"
         } else {
-            "Reading local Node.js tools…"
+            "Reading locally installed Node.js tools…"
         });
     }
     update(model);
@@ -278,14 +420,14 @@ fn probe(model: &Rc<RefCell<Ui>>, remote: bool) {
             m.busy = false;
             match result {
                 Ok(snapshot) => {
-                    let warnings = snapshot.warnings.join(" · ");
+                    let warning = snapshot.warnings.join(" · ");
                     m.versions = snapshot;
-                    m.status.set_text(if warnings.is_empty() {
-                            if remote { "Update check finished. Choose an enabled button to install." }
-                            else { "Installed tool versions refreshed. Click Check updates for remote versions." }
-                        } else { &warnings });
+                    m.status.set_text(if warning.is_empty() {
+                            if remote { "Update check finished. Select a package or Node version to update." }
+                            else { "Installed versions refreshed. Click Check updates for online information." }
+                        } else { &warning });
                 }
-                Err(err) => m.status.set_text(&format!("Check failed: {err}")),
+                Err(e) => m.status.set_text(&format!("Check failed: {e}")),
             }
             drop(m);
             update(&model);
@@ -304,31 +446,23 @@ fn probe(model: &Rc<RefCell<Ui>>, remote: bool) {
     });
 }
 
-fn install(model: &Rc<RefCell<Ui>>, kind: Install) {
+fn operation<F>(model: &Rc<RefCell<Ui>>, progress: &str, job: F)
+where
+    F: FnOnce() -> Result<String, String> + Send + 'static,
+{
     if model.borrow().busy {
         return;
     }
-    let v = model.borrow().versions.clone();
-    let (target, eligible) = match kind {
-        Install::Nvm => (v.nvm_latest, v.nvm_git_checkout),
-        Install::Lts => (v.lts_latest, v.nvm_available),
-        Install::Npm => (v.npm_latest, v.nvm_available && v.lts.is_some()),
-        Install::Current => (v.current_latest, v.nvm_available),
-    };
-    let Some(target) = target.filter(|_| eligible) else {
-        return;
-    };
     {
         let mut m = model.borrow_mut();
         m.busy = true;
-        m.status
-            .set_text("Installing the selected update… Please keep zSoft Manager open.");
+        m.status.set_text(progress);
     }
     update(model);
     let (tx, rx) = mpsc::channel();
     thread::spawn(move || {
-        let result = node::install(kind, &target)
-            .and_then(|message| node::inspect(false).map(|snapshot| (message, snapshot)));
+        let result =
+            job().and_then(|message| node::inspect(false).map(|versions| (message, versions)));
         let _ = tx.send(result);
     });
     let model = model.clone();
@@ -339,11 +473,9 @@ fn install(model: &Rc<RefCell<Ui>>, kind: Install) {
             match result {
                 Ok((message, versions)) => {
                     m.versions = versions;
-                    m.status.set_text(&format!(
-                        "{message}. Click Check updates to verify remote versions."
-                    ));
+                    m.status.set_text(&message);
                 }
-                Err(err) => m.status.set_text(&format!("Install failed: {err}")),
+                Err(err) => m.status.set_text(&format!("Operation failed: {err}")),
             }
             drop(m);
             update(&model);
@@ -355,9 +487,39 @@ fn install(model: &Rc<RefCell<Ui>>, kind: Install) {
             model
                 .borrow()
                 .status
-                .set_text("Install failed: worker disconnected");
+                .set_text("Operation failed: worker disconnected");
             update(&model);
             glib::ControlFlow::Break
         }
     });
+}
+fn install(model: &Rc<RefCell<Ui>>, kind: Install) {
+    if model.borrow().busy {
+        return;
+    }
+    let v = model.borrow().versions.clone();
+    let (target, allowed) = match kind {
+        Install::Nvm => (v.nvm_latest, v.nvm_git_checkout),
+        Install::Lts => (v.lts_latest, v.nvm_available),
+        Install::Npm => (v.npm_latest, v.nvm_available && v.lts.is_some()),
+        Install::Current => (v.current_latest, v.nvm_available),
+    };
+    let Some(version) = target.filter(|_| allowed) else {
+        return;
+    };
+    operation(model, "Installing the selected update…", move || {
+        node::install(kind, &version)
+    });
+}
+fn set_default(model: &Rc<RefCell<Ui>>, version: String) {
+    operation(model, "Updating NVM default alias…", move || {
+        node::set_default_version(&version)
+    });
+}
+fn update_package(model: &Rc<RefCell<Ui>>, name: String) {
+    operation(
+        model,
+        "Updating the selected global npm package…",
+        move || node::update_global_package(&name),
+    );
 }

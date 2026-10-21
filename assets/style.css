@@ -244,3 +244,30 @@ headerbar.compact-titlebar windowcontrols button {
 .python-config .pathline {
   color: #617f9f;
 }
+
+/* v0.4.2: compact flat Node.js lifecycle and version management */
+.node-section-heading {
+  font-size: 15px;
+  font-weight: 700;
+  color: #254f80;
+}
+.node-phase-badge {
+  border-radius: 7px;
+  padding: 5px 10px;
+  font-weight: 700;
+  font-size: 11px;
+  background: #ebeff5;
+  color: #566879;
+}
+.node-badge-lts { background: #e0f4ea; color: #146c44; }
+.node-badge-current { background: #e1efff; color: #225da6; }
+.node-badge-eol { background: #fff0ec; color: #ab4336; }
+.node-badge-unknown { background: #edf1f6; color: #5b6c7c; }
+.node-minicard {
+  background: #fbfdff;
+  border: 1px solid #e0eaf6;
+  border-radius: 9px;
+  padding: 11px 14px;
+}
+.node-minicard button { min-height: 34px; }
+.node-empty { padding: 10px 14px; color: #6a819a; }

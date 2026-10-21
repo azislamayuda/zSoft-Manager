@@ -2,6 +2,28 @@
 
 All notable changes to this project are recorded here. Format follows Keep a Changelog.
 
+## [0.4.2] - 2026-10-21
+
+### Added
+
+- Node.js lifecycle badges on Active Node and installed versions: LTS (Active/Maintenance), Current, EOL, Unknown. Uses bundled official Node.js release schedule offline; Check updates refreshes the schedule from nodejs/Release on demand.
+- Active-in-app and NVM Default Node indicators, including raw default alias and resolved version.
+- Installed NVM Node versions, ordered numerically, with per-version **Set default** actions for future NVM shells.
+- Global npm package inventory for the selected default NVM Node, checked locally on page load. Online outdated checks and per-package update buttons require manual action.
+- Rust tests for lifecycle boundaries, default parsing, version enumeration, safe npm package names and JSON parsing.
+
+### Changed
+
+- v0.4.2 Node.js page contains sectioned flat cards and status badges matching the soft-blue theme.
+- Optional Node Current installation preserves the previously selected NVM default alias.
+- README now documents Node version selection and npm global package management.
+
+### Safety
+
+- NVM switching changes the default alias for **new** NVM shells, not already-open terminals.
+- Global npm updates target a single validated package in the NVM environment; npm itself is managed using the dedicated compatible npm updater.
+- Existing AppImage and Python features are unchanged, with no automatic cleanup, sudo, or idle network requests.
+
 ## [0.4.1] - 2026-10-21
 
 ### Added
