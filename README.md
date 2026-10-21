@@ -98,7 +98,7 @@ bash scripts/build-appimage.sh
 
 On x86_64 Ubuntu, the script downloads an official linuxdeploy binary if not already cached, assembles GTK4-linked components into an AppDir and writes the AppImage + SHA256 file to `dist/`. Runtime portability must still be smoke-tested on the target Ubuntu versions. It is also possible to create a release via the GitHub Actions workflow by pushing a tag, after building and testing locally.
 
-Use GitHub Desktop for **Commit to main** and **Push origin**. Create the tag `v0.4.2` from GitHub's new-release page, rather than using Git CLI.
+Use GitHub Desktop for **Commit to main** and **Push origin**. Create the tag `v0.4.4` from GitHub's new-release page, rather than using Git CLI.
 
 The GitHub Actions `release-appimage.yml` job will test, build, package, and upload the AppImage to GitHub Releases. A Release is required before the self-updater works; an empty repository is not a Release.
 
@@ -108,7 +108,7 @@ The development repository is expected at `/home/lamayuda/ZDATA/ME/GITHUB/zSoft-
 
 ## Previous zAppImage Manager migration
 
-If you already cloned `zSoft-Manager` via GitHub Desktop, **do not run the old migration script again**. Extract the v0.4.2 PATCH into your existing clone. Do not overwrite `.git`. Local Git operations are performed with GitHub Desktop, not the command line.
+If you already cloned `zSoft-Manager` via GitHub Desktop, **do not run the old migration script again**. Extract the v0.4.4 PATCH into your existing clone. Do not overwrite `.git`. Local Git operations are performed with GitHub Desktop, not the command line.
 
 Source configuration reads existing `~/.config/zappimage-manager/sources.json` and state `~/.local/state/zappimage-manager/installed.json` as a fallback, and saves future changes under `zsoft-manager`. Old files remain untouched and existing rollback backups are preserved.
 
@@ -145,3 +145,20 @@ Self-update checks only offer installation after a matching published AppImage a
 After self-installation, the application verifies the final installed file, and attempts to roll back if verification fails. Restart zSoft Manager after a successful update.
 
 The Node.js and Python management pages are constructed only when first opened. AppImage scans reuse their existing GTK rows when the file list is unchanged. The Node view avoids deep-cloning the release schedule and global package inventory on each repaint. This is intended to reduce initial allocations and unnecessary work; actual memory usage depends on GTK4, distribution and workload.
+
+
+## v0.4.4 AppImage compatibility and safe release fallback
+
+The GitHub AppImage updater accepts generic architecture filename aliases (`x86_64`, `x64`, `amd64`) and AppImages without architecture labels. Explicit product-specific patterns are never broadened automatically. It excludes foreign architectures by name and validates the downloaded executable's 64-bit x86_64 ELF machine type before installation.
+
+If the latest stable GitHub release is mobile-only, has no AppImage, or offers only AppImages for other architectures, the checker inspects up to 12 recent stable releases for the latest suitable AppImage. An unfinished upload or SHA256 checksum does **not** trigger fallback. In-app self-update always requires the latest release and verified SHA256, and never falls back.
+
+Diagnostic errors distinguish **Network error**, **GitHub API HTTP error**, **Asset pattern mismatch**, **Architecture mismatch**, **Ambiguous AppImage assets**, and **No compatible x86_64 AppImage**.
+
+A network-free regression suite exercises seven publisher scenarios from `tests/fixtures/github-appimage-regressions.json`. Verified asset filenames are identified in fixture provenance; representative names must be checked via `bash scripts/inspect-github-appimages.sh` before assuming upstream uses that exact string. This optional live audit only lists GitHub Release assets and does not download or install AppImages.
+
+Before packaging: `bash scripts/audit-v044.sh`, then `cargo run --release`. Test AppImage Check updates with existing configured source patterns and confirm intended asset/version before clicking Update. The full AppImage build follows only after local tests pass.
+
+### Matching manually installed versionless AppImages (v0.4.4)
+
+On-demand GitHub update checks compare publisher SHA256 digests **and** published `.AppImage.sha256` sidecars to the bytes in a local renamed AppImage. When they match, status is **Up to date**, with no reinstall. If a checksum is unavailable or does not match, zSoft Manager will not guess: use **Set local version** after checking the version in the installed application's About window. Such an assertion is recorded against the exact local file SHA256 and repository; a replaced AppImage or changed repository invalidates it. Its status is marked **User-confirmed** rather than publisher-verified. Once current, the row displays a disabled **Up to date** check action; **Edit local version** is available from **Source** if a user-confirmation was saved and the release has been checked. If an older version is recorded, **Install update** remains available. No automatic background checks, reinstalls or downloads occur.

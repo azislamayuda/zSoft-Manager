@@ -1,0 +1,60 @@
+{
+  "cases": [
+    {
+      "application": "PDFCraft",
+      "repository": "PDFCraftTool/pdfcraft",
+      "pattern": "*x86_64*.AppImage",
+      "expected": "PDFCraft_0.1.0_amd64.AppImage",
+      "provenance": "user-observed local AppImage name; historical fixture",
+      "assets": ["PDFCraft_0.1.0_amd64.AppImage", "PDFCraft_0.1.0_amd64.deb"]
+    },
+    {
+      "application": "Trilium",
+      "repository": "TriliumNext/Trilium",
+      "pattern": "*x86_64*.AppImage",
+      "expected": "TriliumNotes-v0.106.0-linux-x64.AppImage",
+      "provenance": "verified upstream release 0.106.0",
+      "assets": ["TriliumNotes-v0.106.0-linux-arm64.AppImage", "TriliumNotes-v0.106.0-linux-x64.AppImage", "TriliumNotes-v0.106.0-linux-x64.deb"]
+    },
+    {
+      "application": "Obsidian",
+      "repository": "obsidianmd/obsidian-releases",
+      "pattern": "*x86_64*.AppImage",
+      "expected": "Obsidian-1.13.7.AppImage",
+      "provenance": "verified release 1.13.7 desktop",
+      "assets": ["Obsidian-1.13.7-arm64.AppImage", "Obsidian-1.13.7.AppImage", "Obsidian-1.13.7.dmg"]
+    },
+    {
+      "application": "OmniGet",
+      "repository": "OpenSelena/omniget",
+      "pattern": "*x86_64*.AppImage",
+      "expected": "omniget_0.12.0_amd64.AppImage",
+      "provenance": "representative filename based on documented amd64/arm64 naming; confirm from live API",
+      "assets": ["omniget_0.12.0_arm64.AppImage", "omniget_0.12.0_amd64.AppImage", "omniget_0.12.0_amd64.AppImage.zsync"]
+    },
+    {
+      "application": "GitHub Copilot",
+      "repository": "github/app",
+      "pattern": "*x86_64*.AppImage",
+      "expected": "GitHub-Copilot-linux-x64.AppImage",
+      "provenance": "verified upstream asset filename",
+      "assets": ["GitHub-Copilot-linux-arm64.AppImage", "GitHub-Copilot-linux-x64.AppImage"]
+    },
+    {
+      "application": "GitHub Desktop (Linux fork)",
+      "repository": "shiftkey/desktop",
+      "pattern": "*x86_64*.AppImage",
+      "expected": "GitHubDesktop-linux-x64-3.4.13-linux1.AppImage",
+      "provenance": "representative x64 filename; confirm exact asset from live API",
+      "assets": ["GitHubDesktop-linux-arm64-3.4.13-linux1.AppImage", "GitHubDesktop-linux-x64-3.4.13-linux1.AppImage", "GitHubDesktop-linux-amd64-3.4.13-linux1.deb"]
+    },
+    {
+      "application": "OpenPLC Editor",
+      "repository": "Autonomy-Logic/openplc-editor",
+      "pattern": "*x86_64*.AppImage",
+      "expected": "OpenPLC-Editor-4.3.2-linux-x64.AppImage",
+      "provenance": "representative x64 filename; confirm exact asset from live API",
+      "assets": ["OpenPLC-Editor-4.3.2-linux-arm64.AppImage", "OpenPLC-Editor-4.3.2-linux-x64.AppImage", "OpenPLC-Editor-4.3.2-linux-x64.deb"]
+    }
+  ]
+}

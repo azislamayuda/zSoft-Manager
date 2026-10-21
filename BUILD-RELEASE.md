@@ -1,6 +1,6 @@
-# zSoft Manager v0.4.2.1 — Ubuntu build and release
+# zSoft Manager v0.4.4 — Ubuntu build and release
 
-Cargo.toml uses `version = "0.4.2+1"` (valid SemVer); release packaging and GitHub tags use `v0.4.2.1`. The build scripts and workflow translate the `+1` metadata to `.1` in public filenames.
+Cargo.toml uses `version = "0.4.4"`. Release packaging and GitHub tags use `v0.4.4`.
 
 
 The downloadable source bundle contains the Rust project, but it is **not** a precompiled AppImage.
@@ -8,7 +8,7 @@ Build the binary on x86_64 Ubuntu (GTK4 development headers and the Rust stable 
 
 ## 1. Copy update into the existing GitHub Desktop clone
 
-Extract `zSoft-Manager-v0.4.2.1-PATCH.zip` into:
+Extract `zSoft-Manager-v0.4.4-UI-POLISH-PATCH.zip` into:
 
 `/home/lamayuda/ZDATA/ME/GITHUB/zSoft-Manager`
 
@@ -26,13 +26,13 @@ bash scripts/test-and-build.sh
 
 If it succeeds, expect:
 
-- `dist/zSoft-Manager-v0.4.2.1-x86_64.AppImage`
-- `dist/zSoft-Manager-v0.4.2.1-x86_64.AppImage.sha256`
+- `dist/zSoft-Manager-v0.4.4-x86_64.AppImage`
+- `dist/zSoft-Manager-v0.4.4-x86_64.AppImage.sha256`
 
 Test the resulting AppImage directly before publishing:
 
 ```bash
-./dist/zSoft-Manager-v0.4.2.1-x86_64.AppImage
+./dist/zSoft-Manager-v0.4.4-x86_64.AppImage
 ```
 
 Try **AppImage**, **Node.js** and **Python** pages. Check that Active Node shows an LTS/Current/EOL badge; verify installed Node versions and Default Node. For a safe switcher test, choose an already-installed Node version, click **Set default**, and verify `nvm alias default` in a newly started terminal. Check that already-open terminals do not change. The global npm list should show installed packages without network access; online queries should only start when clicking **Check updates**. Inspect target versions before installing anything.
@@ -41,19 +41,19 @@ Try **AppImage**, **Node.js** and **Python** pages. Check that Active Node shows
 
 Open `zSoft-Manager`, inspect changes, **Commit to main** with summary:
 
-`feat: add Node lifecycle, version switcher and npm globals v0.4.2.1`
+`fix: verify local AppImage versions with SHA256 sidecars`
 
 Then **Push origin**.
 
 ## 4. Publish the AppImage
 
-Open the repository at https://github.com/azislamayuda/zSoft-Manager . Create a release with tag `v0.4.2.1`, title `zSoft Manager v0.4.2.1 - Navigation UI Polish`, and upload the AppImage plus `.sha256` file.
+Open the repository at https://github.com/azislamayuda/zSoft-Manager . Create a release with tag `v0.4.4`, title `zSoft Manager v0.4.4 - Smart AppImage Detection and Version Matching`, and upload the AppImage plus `.sha256` file.
 
 **CI conflict:** The repository already contains a tag-triggered AppImage GitHub Actions workflow. If you want to upload binaries manually, disable the workflow from GitHub Actions before publishing the release; alternatively, keep it enabled and let the workflow publish the assets. Do not use both processes to publish different binaries under the same release.
 
 ## Notes
 
-- Self-update will work only after `v0.4.2.1` is published and a supported AppImage has been installed under a subfolder of `~/Applications`.
+- Self-update will work only after `v0.4.4` is published and a supported AppImage has been installed under a subfolder of `~/Applications`.
 - Node updates only manage the user's NVM installation. No automatic removal of old Node versions.
 - Titlebar appearance depends partly on Ubuntu's GTK theme and window manager.
 - The AppImage must be tested on supported Ubuntu versions; merely finishing Cargo compilation is not sufficient to guarantee portability.
@@ -81,3 +81,23 @@ ps -C zsoft-manager -o pid,rss,etime,args
 ```
 
 `RSS` is in KiB. Compare an idle AppImage-only session with v0.4.2.1 under the same display/backend. Memory will rise after first opening the Node.js or Python page because their widgets are then allocated.
+
+
+## v0.4.4 release candidate checklist
+
+```bash
+cargo fmt
+bash scripts/audit-v044.sh
+bash scripts/inspect-github-appimages.sh  # Optional; uses GitHub API, no application downloads
+cargo run --release
+```
+
+Inspect seven AppImage sources, at least one case of release fallback (Obsidian), and update status differences (pending upload vs no AppImage vs architecture or pattern mismatch). Confirm that `check_with_readiness(..., require_checksum=true)` still checks only the latest tagged self-release. Do not update all applications based only on filename heuristics; confirm the selected asset.
+
+Only after local checks pass, build and test AppImage with `bash scripts/test-and-build.sh`. Keep `.git` untouched when installing source ZIPs; use GitHub Desktop for commits.
+
+### Installed AppImage version confirmation (v0.4.4)
+
+On demand, **Check updates** reads GitHub `digest` and optional `.AppImage.sha256` sidecars. When the local file matches, status is `Up to date` without reinstall. If a versionless file cannot be verified from publisher SHA256, click **Set local version**, enter the version shown by the installed application's About screen, and click **Confirm version**. The record is tagged **User-confirmed** and tied to the source repository and SHA256 of the local file; replacing the binary revokes it. **Up to date** replaces the main action with a disabled check icon when the local version is current. To correct a saved manual version, open **Source → Edit local version**. The editor hides **Reinstall latest** when the installed version is already current; no reinstall is automatic.
+
+Do not build/publish the release until the Ubuntu regression tests and GUI smoke tests above pass.

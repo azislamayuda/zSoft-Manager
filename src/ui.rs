@@ -46,6 +46,7 @@ struct Model {
 enum Event {
     Checked(PathBuf, Result<(ReleaseInfo, CheckState), String>),
     Updated(PathBuf, Result<String, String>),
+    LocalVersionConfirmed(PathBuf, Result<CheckState, String>),
     SelfChecked(Result<self_update::SelfUpdateStatus, String>),
     SelfInstalled(Result<String, String>),
     Done { refresh_list: bool },
@@ -106,17 +107,54 @@ fn button_with_icon(label: &str, icon_name: &str, style: &str) -> gtk::Button {
     button
 }
 
-fn set_button_text(button: &gtk::Button, label: &str) {
+fn set_button_content(button: &gtk::Button, label: &str, icon_name: &str) {
     if let Some(content) = button
         .child()
         .and_then(|child| child.downcast::<gtk::Box>().ok())
     {
+        if let Some(icon) = content
+            .first_child()
+            .and_then(|child| child.downcast::<gtk::Image>().ok())
+        {
+            icon.set_icon_name(Some(icon_name));
+        }
         if let Some(text) = content
             .last_child()
             .and_then(|child| child.downcast::<gtk::Label>().ok())
         {
             text.set_text(label);
         }
+    }
+}
+
+/// A matching installed version is a status, not an invitation to install again.
+/// Keep the primary button for updates and first-time version confirmation only.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AppAction {
+    CheckUpdates,
+    InstallUpdate,
+    SetLocalVersion,
+    UpToDate,
+}
+
+fn app_action(state: Option<CheckState>, has_release: bool) -> AppAction {
+    if !has_release {
+        return AppAction::CheckUpdates;
+    }
+    match state {
+        Some(CheckState::Available) => AppAction::InstallUpdate,
+        Some(CheckState::Uncertain) => AppAction::SetLocalVersion,
+        Some(CheckState::UpToDate | CheckState::UserConfirmed) => AppAction::UpToDate,
+        None => AppAction::CheckUpdates,
+    }
+}
+
+fn action_ui(action: AppAction) -> (&'static str, &'static str, &'static str) {
+    match action {
+        AppAction::CheckUpdates => ("Check updates", "view-refresh-symbolic", "Run Check updates before installing"),
+        AppAction::InstallUpdate => ("Install update", "software-update-available-symbolic", "Install the confirmed newer AppImage (backup available for rollback)"),
+        AppAction::SetLocalVersion => ("Set local version", "document-edit-symbolic", "Confirm the version shown in the installed application's About screen; no download"),
+        AppAction::UpToDate => ("Up to date", "emblem-ok-symbolic", "This AppImage is current. If manually confirmed, change its recorded version using Source."),
     }
 }
 
@@ -779,11 +817,8 @@ fn rescan(model: &Rc<RefCell<Model>>) {
         let normalize_button =
             button_with_icon("Stable name", "edit-rename-symbolic", "subtle-button");
         let backup_button = button_with_icon("Rollback", "edit-undo-symbolic", "subtle-button");
-        let update_button = button_with_icon(
-            "Install update",
-            "software-update-available-symbolic",
-            "soft-button",
-        );
+        let update_button =
+            button_with_icon("Check updates", "view-refresh-symbolic", "soft-button");
         line.append(&source_button);
         line.append(&normalize_button);
         line.append(&update_button);
@@ -807,14 +842,22 @@ fn rescan(model: &Rc<RefCell<Model>>) {
         {
             let model = model.clone();
             update_button.connect_clicked(move |_| {
-                let chosen = model
+                let selected = model
                     .borrow()
                     .entries
                     .iter()
                     .find(|e| e.path == path_for_update)
-                    .and_then(|e| e.release.clone());
-                if let Some(release) = chosen {
-                    launch_update(&model, vec![(path_for_update.clone(), release)]);
+                    .map(|e| (e.release.clone(), e.availability));
+                if let Some((Some(release), availability)) = selected {
+                    match app_action(availability, true) {
+                        AppAction::SetLocalVersion => {
+                            confirm_local_version(&model, &path_for_update)
+                        }
+                        AppAction::InstallUpdate => {
+                            launch_update(&model, vec![(path_for_update.clone(), release)])
+                        }
+                        AppAction::UpToDate | AppAction::CheckUpdates => {}
+                    }
                 }
             });
         }
@@ -916,19 +959,19 @@ fn update_control_state(model: &Rc<RefCell<Model>>) {
         e.source_button.set_sensitive(!m.busy);
         e.backup_button
             .set_sensitive(!m.busy && update::backup_for(&e.path).is_file());
-        let can_update = matches!(
-            e.availability,
-            Some(CheckState::Available | CheckState::Uncertain)
-        ) && e.release.is_some();
-        e.update_button.set_sensitive(!m.busy && can_update);
-        set_button_text(
-            &e.update_button,
-            if e.availability == Some(CheckState::Uncertain) {
-                "Install latest"
-            } else {
-                "Install update"
-            },
+        let action = app_action(e.availability, e.release.is_some());
+        let (label, icon, tooltip) = action_ui(action);
+        // Up-to-date files must never offer a reinstall on the main row,
+        // including user-confirmed installations without an upstream checksum.
+        e.update_button.set_sensitive(
+            !m.busy
+                && matches!(
+                    action,
+                    AppAction::InstallUpdate | AppAction::SetLocalVersion
+                ),
         );
+        set_button_content(&e.update_button, label, icon);
+        e.update_button.set_tooltip_text(Some(tooltip));
     }
 }
 
@@ -1104,6 +1147,146 @@ fn confirm_normalization(model: &Rc<RefCell<Model>>, path: &PathBuf) {
     open_modal(model, &card);
 }
 
+/// For manually installed versionless AppImages, never assume the upstream
+/// version based solely on a stable filename or file timestamp. The user may
+/// record the version reported by the application's About screen. An SHA256
+/// fingerprint detects later local replacements and revokes that assertion.
+fn confirm_local_version(model: &Rc<RefCell<Model>>, path: &PathBuf) {
+    if model.borrow().busy || model.borrow().modal_layer.is_visible() {
+        return;
+    }
+    let (release, source, already_current) = {
+        let m = model.borrow();
+        let Some(entry) = m.entries.iter().find(|entry| entry.path == *path) else {
+            return;
+        };
+        let already_current = matches!(
+            entry.availability,
+            Some(CheckState::UpToDate | CheckState::UserConfirmed)
+        );
+        let Some(release) = entry.release.clone() else {
+            return;
+        };
+        let sources = match config::load_sources() {
+            Ok(sources) => sources,
+            Err(error) => {
+                m.footer.set_text(&format!("Sources unavailable: {error}"));
+                return;
+            }
+        };
+        let dir = scan::relative_dir(&m.root, path).unwrap_or_default();
+        let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        let Some(source) = config::resolved_source(&sources, &dir, filename) else {
+            return;
+        };
+        (release, source, already_current)
+    };
+    if source.provider != SourceProvider::Github {
+        model
+            .borrow()
+            .footer
+            .set_text("Manual version confirmation supports GitHub sources only.");
+        return;
+    }
+    let (card, form, actions, close) = modal_card("Confirm installed AppImage version");
+    let description = gtk::Label::new(Some(
+        "If the installed application's About screen reports this release version, save it here without downloading anything. This is your confirmation, not publisher SHA256 verification. Changing the local AppImage will invalidate the confirmation."
+    ));
+    description.set_wrap(true);
+    description.set_xalign(0.0);
+    description.add_css_class("modal-description");
+    form.append(&description);
+    let previous_tag = config::load_installed()
+        .ok()
+        .and_then(|installed| {
+            installed
+                .local_version_confirmations
+                .get(path.to_string_lossy().as_ref())
+                .filter(|record| record.repository == source.repository)
+                .map(|record| record.tag.clone())
+        })
+        .unwrap_or_default();
+    let installed_tag = field(
+        &form,
+        "Version currently installed (release tag)",
+        &previous_tag,
+    );
+    installed_tag.set_placeholder_text(Some(
+        "Enter the version shown in the installed app's About screen",
+    ));
+    let latest = gtk::Label::new(Some(&format!("Latest GitHub release: {}", release.tag)));
+    latest.set_xalign(0.0);
+    latest.add_css_class("modal-description");
+    form.append(&latest);
+    let error = gtk::Label::new(None);
+    error.set_wrap(true);
+    error.set_xalign(0.0);
+    error.add_css_class("error-text");
+    form.append(&error);
+
+    let cancel = button_with_icon("Cancel", "window-close-symbolic", "flat-button");
+    let reinstall = button_with_icon(
+        "Reinstall latest",
+        "software-update-available-symbolic",
+        "subtle-button",
+    );
+    let save = button_with_icon("Confirm version", "emblem-ok-symbolic", "primary-button");
+    actions.append(&cancel);
+    if !already_current {
+        actions.append(&reinstall);
+    }
+    actions.append(&save);
+    for dismiss in [close, cancel] {
+        let model = model.clone();
+        dismiss.connect_clicked(move |_| close_modal(&model));
+    }
+    {
+        let model = model.clone();
+        let path = path.clone();
+        let release = release.clone();
+        reinstall.connect_clicked(move |_| {
+            close_modal(&model);
+            launch_update(&model, vec![(path.clone(), release.clone())]);
+        });
+    }
+    {
+        let model = model.clone();
+        let path = path.clone();
+        save.connect_clicked(move |_| {
+            let tag = installed_tag.text().trim().to_owned();
+            if tag.is_empty() || tag.len() > 128 || tag.chars().any(char::is_control) {
+                error.set_text("Enter a valid version or release tag (up to 128 characters).");
+                return;
+            }
+            close_modal(&model);
+            let (tx, rx) = mpsc::channel();
+            {
+                let mut m = model.borrow_mut();
+                m.busy = true;
+                m.footer
+                    .set_text("Recording local AppImage version without reinstalling…");
+                if let Some(entry) = m.entries.iter_mut().find(|e| e.path == path) {
+                    entry.status.set_text("Checking local file fingerprint…");
+                }
+            }
+            update_control_state(&model);
+            let source = source.clone();
+            let release = release.clone();
+            let worker_path = path.clone();
+            thread::spawn(move || {
+                let result =
+                    update::confirm_installed_version(&worker_path, &source, &release, &tag);
+                let _ = tx.send(Event::LocalVersionConfirmed(worker_path, result));
+                let _ = tx.send(Event::Done {
+                    refresh_list: false,
+                });
+            });
+            receive_events(model.clone(), rx);
+        });
+    }
+    open_modal(model, &card);
+}
+
 fn configure_source(model: &Rc<RefCell<Model>>, path: &PathBuf) {
     if model.borrow().busy || model.borrow().modal_layer.is_visible() {
         return;
@@ -1121,6 +1304,22 @@ fn configure_source(model: &Rc<RefCell<Model>>, path: &PathBuf) {
     let existing = config::load_sources()
         .ok()
         .and_then(|sources| config::resolved_source(&sources, &dir, &name));
+    // A manual version can be corrected from Source, not from the Up to date
+    // row action. Only show this control for an existing GitHub confirmation.
+    let has_saved_local_version = existing.as_ref().is_some_and(|source| {
+        source.provider == SourceProvider::Github
+            && config::load_installed().ok().is_some_and(|installed| {
+                installed
+                    .local_version_confirmations
+                    .get(path.to_string_lossy().as_ref())
+                    .is_some_and(|record| record.repository == source.repository)
+            })
+    });
+    let has_checked_release = model
+        .borrow()
+        .entries
+        .iter()
+        .any(|entry| entry.path == *path && entry.release.is_some());
 
     let (card, form, actions, close) = modal_card("Configure update source");
     let heading = gtk::Label::new(Some(&format!("Folder: {dir}")));
@@ -1241,6 +1440,23 @@ fn configure_source(model: &Rc<RefCell<Model>>, path: &PathBuf) {
     let save = button_with_icon("Save", "document-save-symbolic", "primary-button");
     save.add_css_class("modal-action");
     actions.append(&cancel);
+    if has_saved_local_version && has_checked_release {
+        let edit_version = button_with_icon(
+            "Edit local version",
+            "document-edit-symbolic",
+            "subtle-button",
+        );
+        edit_version.set_tooltip_text(Some(
+            "Edit the previously confirmed version. Unsaved Source fields will be discarded.",
+        ));
+        actions.append(&edit_version);
+        let m = model.clone();
+        let selected_path = path.clone();
+        edit_version.connect_clicked(move |_| {
+            close_modal(&m);
+            confirm_local_version(&m, &selected_path);
+        });
+    }
     actions.append(&save);
 
     for dismiss in [close, cancel] {
@@ -1450,6 +1666,7 @@ fn receive_events(model: Rc<RefCell<Model>>, rx: mpsc::Receiver<Event>) {
     let mut check_failed = 0usize;
     let mut self_result: Option<Result<String, String>> = None;
     let mut pending_self_check: Option<String> = None;
+    let mut local_version_recorded = false;
     glib::timeout_add_local(Duration::from_millis(180), move || {
         while let Ok(event) = rx.try_recv() {
             match event {
@@ -1467,15 +1684,10 @@ fn receive_events(model: Rc<RefCell<Model>>, rx: mpsc::Receiver<Event>) {
                                     "GitHub digest unavailable"
                                 };
                                 let message = match state {
-                                    CheckState::Available => format!(
-                                        "Update available: {} · {} · {digest}",
-                                        info.tag, info.asset_name
-                                    ),
+                                    CheckState::Available => format!("Update available: {} · {} · {digest}", info.tag, info.asset_name),
                                     CheckState::UpToDate => format!("Up to date: {}", info.tag),
-                                    CheckState::Uncertain => format!(
-                                        "Installed version unknown · Latest {} · {digest}",
-                                        info.tag
-                                    ),
+                                    CheckState::UserConfirmed => format!("Up to date: {} · Local version user-confirmed (not publisher-verified)", info.tag),
+                                    CheckState::Uncertain => format!("Local version unverified · Latest {} · {digest} · No update confirmed", info.tag),
                                 };
                                 e.status.set_text(&message);
                                 e.status.set_tooltip_text(Some(&info.asset_name));
@@ -1488,6 +1700,35 @@ fn receive_events(model: Rc<RefCell<Model>>, rx: mpsc::Receiver<Event>) {
                             }
                         }
                     }
+                }
+                Event::LocalVersionConfirmed(path, result) => {
+                    let mut m = model.borrow_mut();
+                    let status_message = match result {
+                        Ok(state) => {
+                            local_version_recorded = true;
+                            if let Some(entry) = m.entries.iter_mut().find(|e| e.path == path) {
+                                entry.availability = Some(state);
+                                if let Some(info) = &entry.release {
+                                    entry.status.set_text(&match state {
+                                        CheckState::UserConfirmed => format!("Up to date: {} · Local version user-confirmed (not publisher-verified)", info.tag),
+                                        CheckState::UpToDate => format!("Up to date: {}", info.tag),
+                                        CheckState::Available => format!("Update available: {} · Based on confirmed installed version", info.tag),
+                                        CheckState::Uncertain => "Installed version recorded · Comparison unavailable".into(),
+                                    });
+                                }
+                            }
+                            "Local version saved without downloading or modifying the AppImage."
+                        }
+                        Err(ref reason) => {
+                            if let Some(entry) = m.entries.iter_mut().find(|e| e.path == path) {
+                                entry.status.set_text(&format!(
+                                    "Could not record installed version: {reason}"
+                                ));
+                            }
+                            "Unable to confirm the local AppImage version."
+                        }
+                    };
+                    m.footer.set_text(status_message);
                 }
                 Event::Updated(path, result) => {
                     if let Err(reason) = &result {
@@ -1527,7 +1768,10 @@ fn receive_events(model: Rc<RefCell<Model>>, rx: mpsc::Receiver<Event>) {
                             &format!("zSoft Manager is up to date ({})", info.tag),
                         );
                     }
-                    Ok(self_update::SelfUpdateStatus::Ready(_, CheckState::Uncertain)) => {
+                    Ok(self_update::SelfUpdateStatus::Ready(
+                        _,
+                        CheckState::UserConfirmed | CheckState::Uncertain,
+                    )) => {
                         notify(
                             &model,
                             Notice::Error,
@@ -1569,6 +1813,9 @@ fn receive_events(model: Rc<RefCell<Model>>, rx: mpsc::Receiver<Event>) {
                         }
                     } else if let Some(reason) = pending_self_check.take() {
                         reason
+                    } else if local_version_recorded {
+                        "Local installed version recorded. No AppImage was downloaded or replaced."
+                            .to_owned()
                     } else if !refresh_list {
                         "Check complete. You can update or set a stable filename.".to_owned()
                     } else if update_errors.is_empty() {
@@ -1650,6 +1897,33 @@ mod ui_tests {
             ["Rescan", "Check updates", "Update all"]
         );
         assert!(MAIN_ACTION_LABELS.iter().all(|label| label.is_ascii()));
+    }
+
+    #[test]
+    fn up_to_date_is_a_disabled_status_not_a_reinstall_action() {
+        for state in [CheckState::UpToDate, CheckState::UserConfirmed] {
+            let action = app_action(Some(state), true);
+            assert_eq!(action, AppAction::UpToDate);
+            assert_eq!(action_ui(action).0, "Up to date");
+            assert_eq!(action_ui(action).1, "emblem-ok-symbolic");
+        }
+    }
+
+    #[test]
+    fn genuine_updates_and_unknown_local_versions_keep_distinct_actions() {
+        assert_eq!(
+            app_action(Some(CheckState::Available), true),
+            AppAction::InstallUpdate
+        );
+        assert_eq!(
+            app_action(Some(CheckState::Uncertain), true),
+            AppAction::SetLocalVersion
+        );
+        assert_eq!(app_action(None, false), AppAction::CheckUpdates);
+        assert_eq!(
+            app_action(Some(CheckState::Available), false),
+            AppAction::CheckUpdates
+        );
     }
 
     fn source_example() -> Source {

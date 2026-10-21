@@ -38,12 +38,27 @@ pub struct Sources {
     pub sources: Vec<Source>,
 }
 
+/// Version entered by a user after checking the installed application's own version.
+/// The local SHA256 binds this assertion to one exact file; it is not a
+/// publisher signature or an upstream verification.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct LocalVersionConfirmation {
+    pub repository: String,
+    pub tag: String,
+    pub sha256: String,
+    pub file_size: u64,
+}
+
 #[derive(Default, Clone, Serialize, Deserialize)]
 pub struct Installed {
     #[serde(default)]
     pub tags: HashMap<String, String>,
     #[serde(default)]
     pub previous_tags: HashMap<String, String>,
+    /// Backward-compatible optional map. Changing the file or repository
+    /// invalidates a prior user confirmation during Check updates.
+    #[serde(default)]
+    pub local_version_confirmations: HashMap<String, LocalVersionConfirmation>,
 }
 
 pub fn home() -> PathBuf {
@@ -220,6 +235,7 @@ mod tests {
             serde_json::from_str(r#"{"tags":{"/tmp/app.AppImage":"v1.0"}}"#).unwrap();
         assert_eq!(old.tags.len(), 1);
         assert!(old.previous_tags.is_empty());
+        assert!(old.local_version_confirmations.is_empty());
     }
     #[test]
     fn kdenlive_default_source_is_limited_to_its_executable() {

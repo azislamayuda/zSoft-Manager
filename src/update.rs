@@ -2,7 +2,7 @@ use crate::{
     config::{self, Source, SourceProvider},
     naming,
 };
-use serde::Deserialize;
+use serde::{de::DeserializeOwned, Deserialize};
 use std::{
     cmp::Ordering,
     fs,
@@ -27,6 +27,7 @@ pub struct ReleaseInfo {
 pub enum CheckState {
     Available,
     UpToDate,
+    UserConfirmed,
     Uncertain,
 }
 
@@ -46,12 +47,40 @@ enum GithubResponse {
 enum AssetPick<'a> {
     Ready(&'a Asset),
     Pending(&'static str),
+    NoAppImage,
+}
+
+/// The caller can distinguish a wrong pattern from an unsupported architecture
+/// without parsing an English error message. Neither is an upload-in-progress.
+#[derive(Debug)]
+enum AssetSelectionError {
+    WrongArchitecture(String),
+    PatternMismatch { pattern: String, available: String },
+    Ambiguous { pattern: String, matching: String },
+}
+
+impl std::fmt::Display for AssetSelectionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::WrongArchitecture(available) => write!(f,
+                "Architecture mismatch: no x86_64 AppImage; available AppImages: {available}"),
+            Self::PatternMismatch { pattern, available } => write!(f,
+                "Asset pattern mismatch: '{pattern}' does not match a compatible AppImage. Available: {available}. Choose a suitable pattern."),
+            Self::Ambiguous { pattern, matching } => write!(f,
+                "Ambiguous AppImage assets matching '{pattern}': {matching}. Specify a narrower asset pattern."),
+        }
+    }
 }
 
 #[derive(Deserialize)]
 struct Release {
     tag_name: String,
+    #[serde(default)]
     assets: Vec<Asset>,
+    #[serde(default)]
+    draft: bool,
+    #[serde(default)]
+    prerelease: bool,
 }
 
 #[derive(Deserialize)]
@@ -86,8 +115,13 @@ pub fn check_with_readiness(
     saved_tag: Option<&str>,
     require_checksum: bool,
 ) -> Result<CheckOutcome, String> {
-    if source.provider == SourceProvider::Github && !config::valid_repository(&source.repository) {
-        return Err("Repository must be owner/repo".into());
+    if source.provider == SourceProvider::Github {
+        if !config::valid_repository(&source.repository) {
+            return Err("Repository must be owner/repo".into());
+        }
+        if std::env::consts::ARCH != "x86_64" {
+            return Err("GitHub AppImage auto-detection currently supports x86_64 only".into());
+        }
     }
     let stable_filename = source
         .stable_filename
@@ -115,22 +149,201 @@ pub fn check_with_readiness(
             check_kde_kdenlive(source, stable_filename)?
         }
     };
-    let from = saved_tag.and_then(version).or_else(|| {
-        original
-            .file_name()
-            .and_then(|n| n.to_str())
-            .and_then(version)
+    let state = installed_check_state_for_source(original, saved_tag, &info, source);
+    Ok(CheckOutcome::Ready(info, state))
+}
+
+/// Hash a local AppImage without executing it, mounting it or invoking a shell.
+/// This is called only by an explicit user action in a worker thread.
+fn local_sha256(path: &Path) -> Result<String, String> {
+    let meta =
+        fs::symlink_metadata(path).map_err(|e| format!("Local AppImage unavailable: {e}"))?;
+    if !meta.file_type().is_file() || meta.len() == 0 {
+        return Err("Local AppImage must be a non-empty regular file".into());
+    }
+    let output = Command::new("sha256sum")
+        .arg("--")
+        .arg(path)
+        .output()
+        .map_err(|e| format!("Cannot hash local AppImage: {e}"))?;
+    if !output.status.success() {
+        return Err("Could not calculate local AppImage SHA256".into());
+    }
+    let bytes = output
+        .stdout
+        .split(|byte| byte.is_ascii_whitespace())
+        .next()
+        .ok_or("Missing local SHA256 digest")?;
+    let text = std::str::from_utf8(bytes).map_err(|_| "Invalid local SHA256 output")?;
+    sha256_digest(text).ok_or_else(|| "Invalid local SHA256 digest".into())
+}
+
+/// Compare exact bytes with the release, even when the file has a stable name.
+#[cfg(test)]
+fn local_matches_release_checksum(original: &Path, info: &ReleaseInfo) -> bool {
+    let Some(expected) = info.sha256.as_deref() else {
+        return false;
+    };
+    if info.size == 0
+        || !fs::metadata(original).is_ok_and(|meta| meta.is_file() && meta.len() == info.size)
+    {
+        return false;
+    }
+    local_sha256(original).is_ok_and(|digest| digest.eq_ignore_ascii_case(expected))
+}
+
+/// A manual tag is useful for renamed AppImages, but is not cryptographic
+/// evidence of the upstream version. It is tied to the repository and local
+/// file SHA256, and becomes invalid whenever the file is replaced.
+fn confirmed_local_version(
+    repository: &str,
+    confirmation: Option<&config::LocalVersionConfirmation>,
+    file_size: Option<u64>,
+    computed_sha256: Option<&str>,
+) -> Option<String> {
+    let record = confirmation?;
+    if repository.is_empty() || record.repository != repository || record.tag.is_empty() {
+        return None;
+    }
+    if file_size != Some(record.file_size) {
+        return None;
+    }
+    (computed_sha256 == Some(record.sha256.as_str())).then(|| record.tag.clone())
+}
+
+fn checked_state_with_confirmation(
+    original: &Path,
+    saved_tag: Option<&str>,
+    info: &ReleaseInfo,
+    repository: &str,
+    confirmation: Option<&config::LocalVersionConfirmation>,
+) -> CheckState {
+    // Compute at most one local SHA256 even if publisher SHA256 is present
+    // but different and a manual assertion also exists. Work is off the UI thread.
+    let regular_file_size = fs::symlink_metadata(original)
+        .ok()
+        .and_then(|m| m.file_type().is_file().then_some(m.len()));
+    let publisher_match_size =
+        info.sha256.is_some() && info.size != 0 && regular_file_size == Some(info.size);
+    let has_confirmation = confirmation.is_some_and(|record| {
+        !repository.is_empty()
+            && record.repository == repository
+            && regular_file_size == Some(record.file_size)
     });
+    let local_digest = if publisher_match_size || has_confirmation {
+        local_sha256(original).ok()
+    } else {
+        None
+    };
+    if publisher_match_size && info.sha256.as_deref() == local_digest.as_deref() {
+        return CheckState::UpToDate;
+    }
+    let manually_set = confirmed_local_version(
+        repository,
+        confirmation,
+        regular_file_size,
+        local_digest.as_deref(),
+    );
+    if manually_set.as_deref() == Some(info.tag.as_str()) {
+        return CheckState::UserConfirmed;
+    }
+    // Existing zSoft-managed installations continue to use their saved tag.
+    if saved_tag == Some(info.tag.as_str()) {
+        return CheckState::UpToDate;
+    }
+    let source_is_user_confirmation = manually_set.is_some();
+    let from = manually_set
+        .as_deref()
+        .and_then(version)
+        .or_else(|| saved_tag.and_then(version))
+        .or_else(|| {
+            original
+                .file_name()
+                .and_then(|n| n.to_str())
+                .and_then(version)
+        });
     let to = version(&info.tag);
-    let state = match (from, to) {
+    match (from, to) {
         (Some(old), Some(new)) => match cmp_version(&old, &new) {
             Ordering::Less => CheckState::Available,
-            Ordering::Equal | Ordering::Greater => CheckState::UpToDate,
+            Ordering::Equal | Ordering::Greater => {
+                if source_is_user_confirmation {
+                    CheckState::UserConfirmed
+                } else {
+                    CheckState::UpToDate
+                }
+            }
         },
-        _ if saved_tag == Some(info.tag.as_str()) => CheckState::UpToDate,
         _ => CheckState::Uncertain,
-    };
-    Ok(CheckOutcome::Ready(info, state))
+    }
+}
+
+#[cfg(test)]
+fn installed_check_state(
+    original: &Path,
+    saved_tag: Option<&str>,
+    info: &ReleaseInfo,
+) -> CheckState {
+    checked_state_with_confirmation(original, saved_tag, info, "", None)
+}
+
+fn installed_check_state_for_source(
+    original: &Path,
+    saved_tag: Option<&str>,
+    info: &ReleaseInfo,
+    source: &Source,
+) -> CheckState {
+    let key = original.to_string_lossy();
+    let installed = config::load_installed().ok();
+    let record = installed
+        .as_ref()
+        .and_then(|state| state.local_version_confirmations.get(key.as_ref()));
+    checked_state_with_confirmation(original, saved_tag, info, &source.repository, record)
+}
+
+/// User explicitly states the installed version shown by that application's
+/// About page. This does not replace/download the AppImage or claim an upstream
+/// checksum match. The assertion remains valid only for the unchanged local
+/// binary and repository.
+pub fn confirm_installed_version(
+    original: &Path,
+    source: &Source,
+    info: &ReleaseInfo,
+    installed_tag: &str,
+) -> Result<CheckState, String> {
+    if source.provider != SourceProvider::Github || !config::valid_repository(&source.repository) {
+        return Err("Manual version confirmation is available for GitHub sources only".into());
+    }
+    if !safe_asset_url(&source.repository, &info.url) {
+        return Err("Latest release does not match the configured source".into());
+    }
+    let installed_tag = installed_tag.trim();
+    if installed_tag.is_empty()
+        || installed_tag.len() > 128
+        || installed_tag.chars().any(char::is_control)
+    {
+        return Err("Enter a valid installed release tag (up to 128 characters)".into());
+    }
+    // Only managed AppImages; do not follow symlinks out of the Applications tree.
+    managed_file(original)?;
+    let size = fs::symlink_metadata(original)
+        .map_err(|e| e.to_string())?
+        .len();
+    let digest = local_sha256(original)?;
+    let mut state = config::load_installed()?;
+    state.local_version_confirmations.insert(
+        original.to_string_lossy().into_owned(),
+        config::LocalVersionConfirmation {
+            repository: source.repository.clone(),
+            tag: installed_tag.into(),
+            sha256: digest,
+            file_size: size,
+        },
+    );
+    config::save_installed(&state)?;
+    Ok(installed_check_state_for_source(
+        original, None, info, source,
+    ))
 }
 
 const KDE_ROOT: &str = "https://download.kde.org/stable/kdenlive/";
@@ -345,44 +558,131 @@ fn check_kde_kdenlive(source: &Source, stable_filename: String) -> Result<Releas
     Err("No stable Kdenlive x86_64 AppImage found on KDE's official server".into())
 }
 
+/// GitHub projects use x86_64, x64, amd64, or no architecture in AppImage names.
+/// Never guess that ARM/RISC-V/32-bit assets can run on this x86_64 installation.
+fn compatible_x86_64_appimage(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    if !lower.ends_with(".appimage") {
+        return false;
+    }
+    ![
+        "aarch64",
+        "arm64",
+        "arm32",
+        "armv6",
+        "armv7",
+        "armv8",
+        "armhf",
+        "armel",
+        "riscv",
+        "ppc64",
+        "s390",
+        "loongarch",
+        "mips",
+        "i386",
+        "i686",
+        "x86-32",
+        "x86_32",
+        "-arm.",
+        "_arm.",
+        "-x86.appimage",
+        "_x86.appimage",
+    ]
+    .iter()
+    .any(|foreign| lower.contains(foreign))
+}
+
+/// Only the generic architecture template gets an automatic alias fallback.
+/// User-specified product patterns must not accidentally select another product.
+fn generic_x86_64_pattern(pattern: &str) -> bool {
+    matches!(
+        pattern.to_ascii_lowercase().as_str(),
+        "*x86_64*.appimage" | "*x64*.appimage" | "*amd64*.appimage" | "*.appimage"
+    )
+}
+
 /// The selection is fully testable offline with a small deserialized fixture.
 fn select_asset<'a>(
     release: &'a Release,
     pattern: &str,
     require_checksum: bool,
-) -> Result<AssetPick<'a>, String> {
-    // Scan borrowed release assets without allocating a second Vec of matches.
-    let mut matching = release.assets.iter().filter(|asset| {
-        asset.name.to_ascii_lowercase().ends_with(".appimage")
-            && config::wildmatch(pattern, &asset.name)
-    });
-    let Some(asset) = matching.next() else {
-        let any_appimages = release
-            .assets
-            .iter()
-            .any(|entry| entry.name.to_ascii_lowercase().ends_with(".appimage"));
-        return if any_appimages {
-            Err(format!(
-                "No AppImage matches '{pattern}'. Check the asset pattern."
+) -> Result<AssetPick<'a>, AssetSelectionError> {
+    let appimages: Vec<&Asset> = release
+        .assets
+        .iter()
+        .filter(|asset| asset.name.to_ascii_lowercase().ends_with(".appimage"))
+        .collect();
+    if appimages.is_empty() {
+        return if require_checksum {
+            Ok(AssetPick::Pending(
+                "The latest release has no AppImage asset yet",
             ))
         } else {
-            Ok(AssetPick::Pending(
-                "The AppImage asset has not been uploaded yet",
-            ))
+            Ok(AssetPick::NoAppImage)
         };
-    };
-    if matching.next().is_some() {
-        return Err(format!(
-            "More than one AppImage matches '{pattern}'. Refine the asset pattern."
+    }
+
+    let compatible: Vec<&Asset> = appimages
+        .iter()
+        .copied()
+        .filter(|asset| compatible_x86_64_appimage(&asset.name))
+        .collect();
+    if compatible.is_empty() {
+        return Err(AssetSelectionError::WrongArchitecture(
+            appimages
+                .iter()
+                .take(4)
+                .map(|asset| asset.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", "),
         ));
     }
+
+    // Respect specific configured patterns. Generic x86_64 patterns can accept
+    // x64, amd64, or unlabelled AppImages only when the exact pattern fails.
+    let exact: Vec<&Asset> = compatible
+        .iter()
+        .copied()
+        .filter(|asset| config::wildmatch(pattern, &asset.name))
+        .collect();
+    let matches: Vec<&Asset> = if exact.is_empty() && generic_x86_64_pattern(pattern) {
+        compatible.iter().copied().collect()
+    } else {
+        exact
+    };
+    if matches.is_empty() {
+        return Err(AssetSelectionError::PatternMismatch {
+            pattern: pattern.into(),
+            available: compatible
+                .iter()
+                .take(4)
+                .map(|asset| asset.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", "),
+        });
+    }
+    if matches.len() != 1 {
+        return Err(AssetSelectionError::Ambiguous {
+            pattern: pattern.into(),
+            matching: matches
+                .iter()
+                .take(5)
+                .map(|asset| asset.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", "),
+        });
+    }
+
+    let asset = matches[0];
     if asset.size == 0
         || asset
             .state
             .as_deref()
             .is_some_and(|state| state != "uploaded")
     {
-        return Ok(AssetPick::Pending("The AppImage upload is not complete"));
+        return Ok(AssetPick::Pending(
+            "The selected AppImage upload is not complete",
+        ));
     }
     if require_checksum && asset.digest.is_none() {
         let sidecar_name = format!("{}.sha256", asset.name);
@@ -403,6 +703,22 @@ fn select_asset<'a>(
         }
     }
     Ok(AssetPick::Ready(asset))
+}
+
+/// Find an older published release only when the latest one has no usable
+/// desktop AppImage (e.g., the Obsidian repository's mobile-only releases).
+fn find_compatible_release<'a>(
+    releases: &'a [Release],
+    latest_tag: &str,
+    pattern: &str,
+) -> Option<(&'a Release, &'a Asset)> {
+    releases
+        .iter()
+        .filter(|release| !release.draft && !release.prerelease && release.tag_name != latest_tag)
+        .find_map(|release| match select_asset(release, pattern, false) {
+            Ok(AssetPick::Ready(asset)) => Some((release, asset)),
+            _ => None,
+        })
 }
 
 fn sha256_digest(value: &str) -> Option<String> {
@@ -472,15 +788,7 @@ fn download_sha256_sidecar(url: &str, expected_filename: &str) -> Result<String,
         .ok_or_else(|| "The published SHA256 asset has invalid content".into())
 }
 
-fn check_github(
-    source: &Source,
-    stable_filename: String,
-    require_checksum: bool,
-) -> Result<GithubResponse, String> {
-    let api = format!(
-        "https://api.github.com/repos/{}/releases/latest",
-        source.repository
-    );
+fn fetch_github_json<T: DeserializeOwned>(api: &str, max_bytes: &str) -> Result<T, String> {
     let output = Command::new("curl")
         .args([
             "--fail",
@@ -498,60 +806,95 @@ fn check_github(
             "--max-time",
             "30",
             "--max-filesize",
-            "2097152",
+            max_bytes,
             "--header",
             "Accept: application/vnd.github+json",
             "--header",
             "Cache-Control: no-cache",
             "--header",
-            "User-Agent: zSoft-Manager/0.4.3",
+            "User-Agent: zSoft-Manager/0.4.4",
         ])
-        .arg(&api)
+        .arg(api)
         .output()
         .map_err(|e| format!("Cannot run curl: {e}"))?;
     if !output.status.success() {
-        return Err(format!(
-            "GitHub API request failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
+        let detail = String::from_utf8_lossy(&output.stderr);
+        let kind = match output.status.code() {
+            Some(6 | 7 | 28 | 35 | 60) => "Network error",
+            Some(22) => "GitHub API HTTP error (check repository, rate limit or permissions)",
+            Some(63) => "GitHub API response exceeds the safety size limit",
+            _ => "GitHub API request error",
+        };
+        return Err(format!("{kind}: {}", detail.trim()));
     }
-    let release: Release = serde_json::from_slice(&output.stdout)
-        .map_err(|e| format!("Invalid GitHub release response: {e}"))?;
-    let asset = match select_asset(&release, &source.asset_pattern, require_checksum)? {
-        AssetPick::Ready(asset) => asset,
-        AssetPick::Pending(reason) => {
-            return Ok(GithubResponse::Pending {
-                tag: release.tag_name.clone(),
-                reason: reason.into(),
-            })
-        }
-    };
+    serde_json::from_slice(&output.stdout)
+        .map_err(|e| format!("Invalid GitHub release response: {e}"))
+}
+
+fn github_asset_response(
+    source: &Source,
+    release: &Release,
+    asset: &Asset,
+    stable_filename: String,
+    require_checksum: bool,
+) -> Result<GithubResponse, String> {
     if !safe_asset_url(&source.repository, &asset.browser_download_url) {
         return Err("Release asset URL is not within the configured GitHub repository".into());
     }
     let sha256 = match asset.digest.as_deref() {
         Some(value) => Some(sha256_digest(value).ok_or("Invalid GitHub SHA256 digest")?),
-        None if require_checksum => {
+        None => {
+            // The ordinary check also reads a published SHA256 sidecar. This
+            // lets a manually downloaded stable-name AppImage be verified without
+            // reinstalling it (notably shiftkey/desktop). Self-update retains
+            // its strict missing/invalid-checksum behavior.
             let sidecar_name = format!("{}.sha256", asset.name);
-            let sidecar = release
+            match release
                 .assets
                 .iter()
                 .find(|entry| entry.name == sidecar_name)
-                .ok_or("SHA256 sidecar is missing")?;
-            if !safe_asset_url(&source.repository, &sidecar.browser_download_url) {
-                return Err("Checksum URL is not within the configured GitHub repository".into());
-            }
-            match download_sha256_sidecar(&sidecar.browser_download_url, &asset.name) {
-                Ok(digest) => Some(digest),
-                Err(reason) => {
+            {
+                Some(sidecar) => {
+                    if !safe_asset_url(&source.repository, &sidecar.browser_download_url) {
+                        return Err(
+                            "Checksum URL is not within the configured GitHub repository".into(),
+                        );
+                    }
+                    if sidecar.size == 0
+                        || sidecar
+                            .state
+                            .as_deref()
+                            .is_some_and(|state| state != "uploaded")
+                    {
+                        if require_checksum {
+                            return Ok(GithubResponse::Pending {
+                                tag: release.tag_name.clone(),
+                                reason: "The SHA256 checksum upload is incomplete".into(),
+                            });
+                        }
+                        None
+                    } else {
+                        match download_sha256_sidecar(&sidecar.browser_download_url, &asset.name) {
+                            Ok(digest) => Some(digest),
+                            Err(reason) if require_checksum => {
+                                return Ok(GithubResponse::Pending {
+                                    tag: release.tag_name.clone(),
+                                    reason,
+                                })
+                            }
+                            Err(_) => None, // Optional sidecar failure is not an update.
+                        }
+                    }
+                }
+                None if require_checksum => {
                     return Ok(GithubResponse::Pending {
                         tag: release.tag_name.clone(),
-                        reason,
+                        reason: "SHA256 sidecar is missing".into(),
                     })
                 }
+                None => None,
             }
         }
-        None => None,
     };
     Ok(GithubResponse::Ready(ReleaseInfo {
         tag: release.tag_name.clone(),
@@ -561,6 +904,72 @@ fn check_github(
         size: asset.size,
         stable_filename,
     }))
+}
+
+fn check_github(
+    source: &Source,
+    stable_filename: String,
+    require_checksum: bool,
+) -> Result<GithubResponse, String> {
+    let api = format!(
+        "https://api.github.com/repos/{}/releases/latest",
+        source.repository
+    );
+    let release: Release = fetch_github_json(&api, "2097152")?;
+    let absence_reason = match select_asset(&release, &source.asset_pattern, require_checksum) {
+        Ok(AssetPick::Ready(asset)) => {
+            return github_asset_response(
+                source,
+                &release,
+                asset,
+                stable_filename,
+                require_checksum,
+            )
+        }
+        // Never offer an older version when the newest matching AppImage is
+        // still uploading. This also protects against incomplete checksum uploads.
+        Ok(AssetPick::Pending(reason)) => {
+            return Ok(GithubResponse::Pending {
+                tag: release.tag_name.clone(),
+                reason: reason.into(),
+            })
+        }
+        Ok(AssetPick::NoAppImage) => "Latest release has no AppImage asset".to_owned(),
+        Err(AssetSelectionError::WrongArchitecture(_)) if require_checksum => {
+            return Ok(GithubResponse::Pending {
+                tag: release.tag_name.clone(),
+                reason: "The x86_64 AppImage has not been uploaded yet".into(),
+            });
+        }
+        Err(AssetSelectionError::WrongArchitecture(names)) => {
+            format!("Latest release has AppImages for other architectures only: {names}")
+        }
+        Err(reason) => return Err(reason.to_string()),
+    };
+
+    // Fallback is permitted only when the latest stable release lacks an
+    // x86_64 AppImage. Pattern mismatch, ambiguity and incomplete uploads do
+    // NOT silently downgrade to older releases. Self-update never falls back.
+    if require_checksum {
+        return Ok(GithubResponse::Pending {
+            tag: release.tag_name.clone(),
+            reason: absence_reason,
+        });
+    }
+    let api = format!(
+        "https://api.github.com/repos/{}/releases?per_page=12",
+        source.repository
+    );
+    let releases: Vec<Release> = fetch_github_json(&api, "6291456")
+        .map_err(|e| format!("Could not inspect older GitHub releases: {e}"))?;
+    if let Some((older, asset)) =
+        find_compatible_release(&releases, &release.tag_name, &source.asset_pattern)
+    {
+        return github_asset_response(source, older, asset, stable_filename, false);
+    }
+    Err(format!(
+        "No compatible x86_64 AppImage in recent stable releases (latest: {}). {absence_reason}. Checked up to 12 releases.",
+        release.tag_name))
 }
 
 // Conservative dotted-numeric versions. Unknown release schemes need manual one-at-a-time updating.
@@ -830,6 +1239,16 @@ fn move_tracking(old: &Path, target: &Path, new_tag: Option<&str>) -> Result<(),
     config::save_installed(&state)
 }
 
+/// Validate the AppImage runtime header, not only its filename. e_machine=62
+/// means AMD64; this rejects an ARM64 executable even if its name is generic.
+fn valid_x86_64_elf_header(header: &[u8]) -> bool {
+    header.len() >= 20
+        && &header[..4] == b"\x7fELF"
+        && header[4] == 2
+        && header[5] == 1
+        && u16::from_le_bytes([header[18], header[19]]) == 62
+}
+
 pub fn install(original: &Path, info: &ReleaseInfo) -> Result<String, String> {
     managed_file(original)?;
     if !naming::valid_stable_filename(&info.stable_filename) {
@@ -889,10 +1308,13 @@ pub fn install(original: &Path, info: &ReleaseInfo) -> Result<String, String> {
             ));
         }
         let mut file = fs::File::open(&temporary).map_err(|e| e.to_string())?;
-        let mut elf_magic = [0u8; 4];
-        file.read_exact(&mut elf_magic).map_err(|e| e.to_string())?;
-        if &elf_magic != b"\x7fELF" {
-            return Err("File is not an ELF AppImage".into());
+        let mut elf_header = [0u8; 20];
+        file.read_exact(&mut elf_header)
+            .map_err(|e| format!("Invalid AppImage header: {e}"))?;
+        if !valid_x86_64_elf_header(&elf_header) {
+            return Err(
+                "Downloaded AppImage is not an x86_64 ELF executable; update cancelled".into(),
+            );
         }
         if let Some(expected) = &info.sha256 {
             let out = Command::new("sha256sum")
@@ -1089,6 +1511,197 @@ mod tests {
         assert_eq!(version("continuous"), None);
     }
     #[test]
+    fn manually_installed_versionless_appimage_with_matching_sha256_is_up_to_date() {
+        let dir = fixture();
+        let local = dir.join("Obsidian.AppImage");
+        fs::write(&local, b"abc").unwrap();
+        let info = ReleaseInfo {
+            tag: "v1.14.4".into(),
+            asset_name: "Obsidian-1.14.4.AppImage".into(),
+            url: "https://github.com/obsidianmd/obsidian-releases/releases/download/v1.14.4/a"
+                .into(),
+            sha256: Some("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad".into()),
+            size: 3,
+            stable_filename: "Obsidian.AppImage".into(),
+        };
+        assert!(local_matches_release_checksum(&local, &info));
+        assert_eq!(
+            installed_check_state(&local, None, &info),
+            CheckState::UpToDate
+        );
+        assert_eq!(
+            installed_check_state(&local, Some("v1.13.0"), &info),
+            CheckState::UpToDate
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn manual_confirmation_requires_unchanged_file_and_matching_repository() {
+        let dir = fixture();
+        let path = dir.join("GitHubDesktop.AppImage");
+        fs::write(&path, b"abc").unwrap();
+        let record = config::LocalVersionConfirmation {
+            repository: "shiftkey/desktop".into(),
+            tag: "release-3.4.13-linux1".into(),
+            sha256: local_sha256(&path).unwrap(),
+            file_size: 3,
+        };
+        let info = ReleaseInfo {
+            tag: record.tag.clone(),
+            asset_name: "GitHubDesktop-linux-x86_64-3.4.13-linux1.AppImage".into(),
+            url: String::new(),
+            sha256: None,
+            size: 3,
+            stable_filename: "GitHubDesktop.AppImage".into(),
+        };
+        assert_eq!(
+            checked_state_with_confirmation(&path, None, &info, "shiftkey/desktop", Some(&record)),
+            CheckState::UserConfirmed
+        );
+        assert_eq!(
+            checked_state_with_confirmation(&path, None, &info, "desktop/desktop", Some(&record)),
+            CheckState::Uncertain
+        );
+        fs::write(&path, b"abd").unwrap();
+        assert_eq!(
+            checked_state_with_confirmation(&path, None, &info, "shiftkey/desktop", Some(&record)),
+            CheckState::Uncertain
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn user_confirmed_older_version_allows_an_actual_update() {
+        let dir = fixture();
+        let path = dir.join("OpenPLC.Editor.AppImage");
+        fs::write(&path, b"abc").unwrap();
+        let record = config::LocalVersionConfirmation {
+            repository: "Autonomy-Logic/openplc-editor".into(),
+            tag: "v4.3.1".into(),
+            sha256: local_sha256(&path).unwrap(),
+            file_size: 3,
+        };
+        let info = ReleaseInfo {
+            tag: "v4.3.2".into(),
+            asset_name: "OpenPLC.Editor-4.3.2.AppImage".into(),
+            url: String::new(),
+            sha256: Some("0".repeat(64)),
+            size: 3,
+            stable_filename: "OpenPLC.Editor.AppImage".into(),
+        };
+        // The publisher hash does not match these sample bytes, but an
+        // explicit user-confirmed *older* version still enables an update.
+        assert_eq!(
+            checked_state_with_confirmation(
+                &path,
+                None,
+                &info,
+                "Autonomy-Logic/openplc-editor",
+                Some(&record)
+            ),
+            CheckState::Available
+        );
+        let current = config::LocalVersionConfirmation {
+            tag: "v4.3.2".into(),
+            ..record
+        };
+        assert_eq!(
+            checked_state_with_confirmation(
+                &path,
+                None,
+                &info,
+                "Autonomy-Logic/openplc-editor",
+                Some(&current)
+            ),
+            CheckState::UserConfirmed
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn sidecar_digest_works_for_github_desktop_style() {
+        let sidecar = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n";
+        assert_eq!(
+            parse_sha256_sidecar(sidecar, "GitHubDesktop-linux-x86_64-3.4.13-linux1.AppImage")
+                .unwrap()
+                .len(),
+            64
+        );
+    }
+
+    #[test]
+    fn same_size_different_bytes_do_not_claim_latest_and_do_not_force_update() {
+        let dir = fixture();
+        let local = dir.join("Omniget.AppImage");
+        fs::write(&local, b"xyz").unwrap();
+        let info = ReleaseInfo {
+            tag: "v0.12.0".into(),
+            asset_name: "OmniGet_0.12.0_amd64.AppImage".into(),
+            url: String::new(),
+            sha256: Some("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad".into()),
+            size: 3,
+            stable_filename: "Omniget.AppImage".into(),
+        };
+        assert!(!local_matches_release_checksum(&local, &info));
+        assert_eq!(
+            installed_check_state(&local, None, &info),
+            CheckState::Uncertain
+        );
+        fs::write(&local, b"abcd").unwrap();
+        assert!(!local_matches_release_checksum(&local, &info));
+        assert_eq!(
+            installed_check_state(&local, None, &info),
+            CheckState::Uncertain
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn pdfcraft_release_tag_differs_from_package_version_but_checksum_wins() {
+        let dir = fixture();
+        let local = dir.join("PDFCraft_0.1.0_amd64.AppImage");
+        fs::write(&local, b"abc").unwrap();
+        let info = ReleaseInfo {
+            tag: "v2026.10.20-0503080".into(),
+            asset_name: "PDFCraft_0.1.0_amd64.AppImage".into(),
+            url: String::new(),
+            sha256: Some("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad".into()),
+            size: 3,
+            stable_filename: "PDFCraft.AppImage".into(),
+        };
+        assert_eq!(
+            installed_check_state(&local, None, &info),
+            CheckState::UpToDate
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn unknown_version_without_checksum_remains_unverified() {
+        let dir = fixture();
+        let local = dir.join("OpenPLC.Editor.AppImage");
+        fs::write(&local, b"abc").unwrap();
+        let info = ReleaseInfo {
+            tag: "v4.3.2".into(),
+            asset_name: "OpenPLC.Editor-4.3.2.AppImage".into(),
+            url: String::new(),
+            sha256: None,
+            size: 3,
+            stable_filename: "OpenPLC.Editor.AppImage".into(),
+        };
+        assert_eq!(
+            installed_check_state(&local, None, &info),
+            CheckState::Uncertain
+        );
+        assert_eq!(
+            installed_check_state(&local, Some("v4.3.2"), &info),
+            CheckState::UpToDate
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn first_migration_retains_backup_and_shortcut_compatibility() {
         let dir = fixture();
         let old = dir.join("drawio-x86_64-32.4.1.AppImage");
@@ -1223,5 +1836,190 @@ mod tests {
             select_asset(&release, "zSoft-Manager-*-x86_64.AppImage", true),
             Ok(AssetPick::Ready(_))
         ));
+    }
+
+    #[test]
+    fn default_pattern_accepts_x64_amd64_and_unsuffixed_appimages() {
+        for filename in [
+            "GitHub-Copilot-linux-x64.AppImage",
+            "PDFCraft_1.2.0_amd64.AppImage",
+            "Obsidian-1.13.7.AppImage",
+        ] {
+            let release: Release = serde_json::from_str(&format!(r#"{{"tag_name":"v1.2.0","assets":[
+                {{"name":"{}","browser_download_url":"https://github.com/x/y/releases/download/v1/a","size":100}}
+            ]}}"#, filename)).unwrap();
+            match select_asset(&release, "*x86_64*.AppImage", false) {
+                Ok(AssetPick::Ready(asset)) => assert_eq!(asset.name, filename),
+                _ => panic!("expected compatible x86_64 AppImage: {filename}"),
+            }
+        }
+    }
+    #[test]
+    fn arm_asset_is_never_selected_by_generic_pattern() {
+        let release: Release = serde_json::from_str(r#"{"tag_name":"v1","assets":[
+            {"name":"Trilium-linux-arm64.AppImage","browser_download_url":"https://github.com/x/y/releases/download/v1/arm","size":1},
+            {"name":"Trilium-linux-x64.AppImage","browser_download_url":"https://github.com/x/y/releases/download/v1/x64","size":1}
+        ]}"#).unwrap();
+        match select_asset(&release, "*x86_64*.AppImage", false) {
+            Ok(AssetPick::Ready(asset)) => assert_eq!(asset.name, "Trilium-linux-x64.AppImage"),
+            _ => panic!("expected only x64 selection"),
+        }
+    }
+    #[test]
+    fn custom_pattern_is_never_overridden() {
+        let release: Release = serde_json::from_str(r#"{"tag_name":"v1","assets":[
+            {"name":"Trilium-linux-x64.AppImage","browser_download_url":"https://github.com/x/y/releases/download/v1/x64","size":1}
+        ]}"#).unwrap();
+        assert!(select_asset(&release, "OtherProduct-*.AppImage", false).is_err());
+    }
+    #[test]
+    fn mobile_only_latest_falls_back_to_recent_stable_desktop_release() {
+        let releases: Vec<Release> = serde_json::from_str(r#"[
+            {"tag_name":"1.13.8","assets":[]},
+            {"tag_name":"1.13.7","assets":[]},
+            {"tag_name":"1.13.6","assets":[
+                {"name":"Obsidian-1.13.6.AppImage","browser_download_url":"https://github.com/obsidianmd/obsidian-releases/releases/download/1.13.6/Obsidian-1.13.6.AppImage","size":123}
+            ]}
+        ]"#).unwrap();
+        let (release, asset) =
+            find_compatible_release(&releases, "1.13.8", "*x86_64*.AppImage").unwrap();
+        assert_eq!(release.tag_name, "1.13.6");
+        assert_eq!(asset.name, "Obsidian-1.13.6.AppImage");
+    }
+    #[test]
+    fn seven_publisher_asset_name_regressions() {
+        let fixtures: serde_json::Value = serde_json::from_str(include_str!(
+            "../tests/fixtures/github-appimage-regressions.json"
+        ))
+        .unwrap();
+        let cases = fixtures["cases"].as_array().unwrap();
+        assert_eq!(cases.len(), 7);
+        for case in cases {
+            let filenames = case["assets"].as_array().unwrap();
+            let assets: Vec<serde_json::Value> = filenames.iter().map(|filename| {
+                serde_json::json!({
+                    "name": filename.as_str().unwrap(),
+                    "browser_download_url": format!("https://github.com/{}/releases/download/test/asset",
+                        case["repository"].as_str().unwrap()),
+                    "size": 4096,
+                    "state": "uploaded"
+                })
+            }).collect();
+            let release: Release = serde_json::from_value(serde_json::json!({
+                "tag_name": "test", "assets": assets
+            }))
+            .unwrap();
+            match select_asset(&release, case["pattern"].as_str().unwrap(), false) {
+                Ok(AssetPick::Ready(asset)) => assert_eq!(
+                    asset.name,
+                    case["expected"].as_str().unwrap(),
+                    "{}",
+                    case["application"]
+                ),
+                _ => panic!("Could not select {}", case["application"]),
+            }
+        }
+    }
+
+    #[test]
+    fn empty_release_and_foreign_architecture_are_distinct() {
+        let no_assets: Release = serde_json::from_str(
+            r#"{"tag_name":"latest","assets":[{"name":"Tool.deb","browser_download_url":"https://github.com/x/y/releases/download/v1/a","size":100}]}"#
+        ).unwrap();
+        assert!(matches!(
+            select_asset(&no_assets, "*.AppImage", false),
+            Ok(AssetPick::NoAppImage)
+        ));
+        let arm_only: Release = serde_json::from_str(
+            r#"{"tag_name":"latest","assets":[{"name":"Tool-arm64.AppImage","browser_download_url":"https://github.com/x/y/releases/download/v1/a","size":100}]}"#
+        ).unwrap();
+        assert!(matches!(
+            select_asset(&arm_only, "*.AppImage", false),
+            Err(AssetSelectionError::WrongArchitecture(_))
+        ));
+    }
+
+    #[test]
+    fn pattern_mismatch_and_multiple_candidates_are_distinct() {
+        let release: Release = serde_json::from_str(r#"{"tag_name":"v1","assets":[
+            {"name":"Alpha-linux-x64.AppImage","browser_download_url":"https://github.com/x/y/releases/download/v1/a","size":100},
+            {"name":"Beta-linux-x64.AppImage","browser_download_url":"https://github.com/x/y/releases/download/v1/b","size":100}
+        ]}"#).unwrap();
+        assert!(matches!(
+            select_asset(&release, "Gamma-*.AppImage", false),
+            Err(AssetSelectionError::PatternMismatch { .. })
+        ));
+        assert!(matches!(
+            select_asset(&release, "*x86_64*.AppImage", false),
+            Err(AssetSelectionError::Ambiguous { .. })
+        ));
+    }
+
+    #[test]
+    fn incomplete_latest_release_must_not_be_selected_by_fallback() {
+        let latest: Release = serde_json::from_str(r#"{"tag_name":"v3","assets":[
+            {"name":"App-linux-x64.AppImage","browser_download_url":"https://github.com/x/y/releases/download/v3/a","size":0,"state":"starter"}
+        ]}"#).unwrap();
+        assert!(matches!(
+            select_asset(&latest, "*x86_64*.AppImage", false),
+            Ok(AssetPick::Pending(_))
+        ));
+        let older: Vec<Release> = serde_json::from_str(r#"[
+            {"tag_name":"v2","prerelease":true,"assets":[
+                {"name":"App-x64.AppImage","browser_download_url":"https://github.com/x/y/releases/download/v2/a","size":100}
+            ]},
+            {"tag_name":"v1","assets":[
+                {"name":"App-x64.AppImage","browser_download_url":"https://github.com/x/y/releases/download/v1/a","size":100}
+            ]}
+        ]"#).unwrap();
+        let (found, _) = find_compatible_release(&older, "v3", "*x86_64*.AppImage").unwrap();
+        assert_eq!(found.tag_name, "v1");
+        // check_github handles Pending before it ever calls find_compatible_release.
+    }
+
+    #[test]
+    fn downloaded_elf_header_rejects_arm64_and_32_bit() {
+        let mut header = [0u8; 20];
+        header[..4].copy_from_slice(b"\x7fELF");
+        header[4] = 2; // 64-bit ELF
+        header[5] = 1; // little-endian
+        header[18..20].copy_from_slice(&62u16.to_le_bytes());
+        assert!(valid_x86_64_elf_header(&header));
+        header[18..20].copy_from_slice(&183u16.to_le_bytes()); // ARM64
+        assert!(!valid_x86_64_elf_header(&header));
+        header[18..20].copy_from_slice(&62u16.to_le_bytes());
+        header[4] = 1; // 32-bit
+        assert!(!valid_x86_64_elf_header(&header));
+        assert!(!valid_x86_64_elf_header(b"not an AppImage"));
+    }
+
+    #[test]
+    fn newer_only_mobile_release_uses_latest_compatible_stable_fallback() {
+        let releases: Vec<Release> = serde_json::from_str(r#"[
+            {"tag_name":"1.13.8","assets":[
+                {"name":"Obsidian-1.13.8.apk","browser_download_url":"https://github.com/x/y/releases/download/1.13.8/a","size":100}
+            ]},
+            {"tag_name":"1.13.7","assets":[
+                {"name":"Obsidian-1.13.7-arm64.AppImage","browser_download_url":"https://github.com/x/y/releases/download/1.13.7/b","size":200},
+                {"name":"Obsidian-1.13.7.AppImage","browser_download_url":"https://github.com/x/y/releases/download/1.13.7/c","size":200}
+            ]}
+        ]"#).unwrap();
+        let (found, asset) =
+            find_compatible_release(&releases, "1.13.8", "*x86_64*.AppImage").unwrap();
+        assert_eq!(found.tag_name, "1.13.7");
+        assert_eq!(asset.name, "Obsidian-1.13.7.AppImage");
+    }
+
+    #[test]
+    fn no_compatible_asset_does_not_select_arm_or_prerelease() {
+        let releases: Vec<Release> = serde_json::from_str(r#"[
+            {"tag_name":"v2","prerelease":true,"assets":[
+                {"name":"Tool-x64.AppImage","browser_download_url":"https://github.com/x/y/releases/download/v2/x64","size":1}
+            ]},
+            {"tag_name":"v1","assets":[
+                {"name":"Tool-arm64.AppImage","browser_download_url":"https://github.com/x/y/releases/download/v1/arm","size":1}
+            ]}
+        ]"#).unwrap();
+        assert!(find_compatible_release(&releases, "v3", "*x86_64*.AppImage").is_none());
     }
 }

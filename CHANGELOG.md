@@ -2,6 +2,48 @@
 
 All notable changes to this project are recorded here. Format follows Keep a Changelog.
 
+## [0.4.4] - 2026-10-21
+
+### Added
+
+- Smart x86_64 AppImage asset detection for generic patterns, accepting `x86_64`, `x64`, `amd64`, or unlabelled `.AppImage` filenames.
+- Bounded fallback through 12 recent stable GitHub releases when the latest stable release contains no AppImage for this architecture (e.g., Obsidian mobile-only release).
+- Distinct error messages for architecture mismatch, asset pattern mismatch, multiple candidate AppImages, missing AppImages, and GitHub network/API failures.
+- Offline regression fixtures covering PDFCraft, Trilium, Obsidian, OmniGet, GitHub Copilot, Linux GitHub Desktop, and OpenPLC Editor; unverified illustrative filenames are labelled as such.
+- Optional `scripts/inspect-github-appimages.sh` live GitHub API diagnostic, which does not install/update applications.
+
+### Improved local version detection (pre-release fix)
+
+- Compare a manually installed or renamed local AppImage against the selected GitHub release's SHA256 digest during an explicit Check updates request. Matching bytes are identified as up to date, even without a version in the filename or installed.json.
+- Check the expected file size before hashing, and run `sha256sum` without executing the AppImage or expanding a shell command.
+- Distinguish an unverified installed version from a confirmed newer release; offer manual reinstallation as an optional action inside version confirmation, not as a confirmed update.
+- Added offline unit tests for matching and mismatching local checksums, different PDFCraft tag/asset version schemes, and missing checksums.
+
+### Improved installed-version matching (pre-release follow-up)
+
+- Read publisher `.AppImage.sha256` sidecar files during ordinary on-demand GitHub checks, not only self-updates, so manually downloaded files with unchanged bytes can be detected as **Up to date** without reinstalling.
+- For versionless AppImages whose bytes cannot be verified against upstream, provide **Set local version** (later **Edit local version**) with an explicit user-confirmation dialog. The confirmation is tied to the local file SHA256, GitHub repository, and release tag; it expires automatically when the file changes or the source changes.
+- Distinguish checksum-verified **Up to date** from **User-confirmed local version**. Do not automatically mark mismatching/missing checksums as current; no automatic re-download, AppImage execution or reinstallation.
+- Keep the normal Update all behavior restricted to confirmed newer versions. Add regression tests for confirmed/current/older/changed files and `.sha256` parsing.
+
+### UI polish — installed version already current (pre-release follow-up)
+
+- Show a disabled **Up to date** action with a check icon for both SHA256-verified and user-confirmed current AppImages; no install or reinstall is offered in the row.
+- Move **Edit local version** into the existing **Source** dialog for AppImages with a previously saved manual confirmation and a checked GitHub release. Editing does not download or modify the AppImage.
+- Hide **Reinstall latest** inside the local-version editor when a matching version is already recognized. Keep manual confirmation explicitly labelled as not publisher-verified.
+- Add unit tests distinguishing Up to date, Update available, local version unknown, and no-check states.
+
+### Fixed and hardened
+
+- Prevent falling back to stale releases when the newest AppImage is still uploading or its SHA256 checksum is pending.
+- Reject untrusted ARM64/32-bit ELF AppImage content at download verification, even when the filename is unlabelled or mislabelled.
+- Retain strict user-defined product patterns; ambiguous filenames require explicit selection rather than guessing.
+- Preserve pre-existing SHA256 validation, checked download size, backup, rollback and strict self-update readiness from v0.4.3.
+
+### Testing
+
+- Added offline selection/status/architecture regression tests and retained existing backup, rollback and checksum tests. Rust/GTK4 build and GUI tests must be completed on Ubuntu before publishing.
+
 ## [0.4.3] - 2026-10-21
 
 ### Added
