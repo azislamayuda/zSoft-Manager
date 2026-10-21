@@ -1,6 +1,8 @@
 mod config;
 mod info;
 mod naming;
+mod node;
+mod node_ui;
 mod scan;
 mod self_update;
 mod ui;

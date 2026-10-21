@@ -1,5 +1,1 @@
-    Checking gdk4 v0.11.5
-    Checking gsk4 v0.11.5
-    Checking gtk4 v0.11.5
-    Checking zsoft-manager v0.3.0 (/home/lamayuda/ZDATA/ME/GITHUB/zSoft-Manager)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 13.09s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.02s

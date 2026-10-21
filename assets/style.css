@@ -1,4 +1,4 @@
-/* zSoft Manager 0.3.0 — soft-blue, modern flat GTK4. No remote UI assets. */
+/* zSoft Manager 0.4.0 — soft-blue, modern flat GTK4. No remote UI assets. */
 window { background: #f6f9fd; color: #283b55; }
 .app-root { background: #f6f9fd; }
 .hero {
@@ -10,8 +10,8 @@ window { background: #f6f9fd; color: #283b55; }
 .subline { color: #7187a1; font-size: 12px; }
 .navigation { padding: 2px; }
 button.nav-icon-button {
-  background: #edf4fc;
-  border: 1px solid #dbe7f4;
+  background: transparent;
+  border: 1px solid transparent;
   border-radius: 11px;
   box-shadow: none;
   min-width: 42px;
@@ -19,7 +19,7 @@ button.nav-icon-button {
   padding: 7px;
   color: #53779f;
 }
-button.nav-icon-button:hover { background: #dfedfd; color: #245c98; }
+button.nav-icon-button:hover { background: transparent; color: #245c98; }
 button.nav-icon-button.nav-active {
   background: #d8eafd;
   border-color: #bdd7f5;
@@ -192,3 +192,39 @@ revealer.toast-error .toast { background: #fff1ef; border-color: #f5c9c3; color:
   font-weight: 600;
   color: #245d94;
 }
+
+/* v0.4.0: CSD title buttons stay close to each other, native controls preserved. */
+headerbar.compact-titlebar {
+  min-height: 34px;
+  padding: 3px 8px;
+  background: #f1f4f8;
+  box-shadow: none;
+  border-bottom: 1px solid #e0e6ee;
+}
+headerbar.compact-titlebar windowcontrols {
+  margin-left: 0;
+  margin-right: 0;
+}
+headerbar.compact-titlebar windowcontrols button {
+  min-width: 22px;
+  min-height: 22px;
+  padding: 3px;
+  margin: 0 1px;
+  border-radius: 8px;
+}
+/* Node page: light, flat, aligned with the existing AppImage page. */
+.node-summary {
+  padding: 13px 17px;
+  background: #edf5ff;
+  border: 1px solid #dceafa;
+  border-radius: 10px;
+}
+.node-card {
+  background: #fff;
+  border: 1px solid #e1eaf4;
+  border-radius: 12px;
+  padding: 15px 17px;
+}
+.node-version { color: #3b6387; font-size: 12px; font-weight: 600; }
+.node-latest { color: #5084ae; font-size: 12px; }
+.node-status { color: #617d99; font-size: 12px; padding: 7px 2px; }

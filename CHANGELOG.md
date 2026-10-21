@@ -2,6 +2,32 @@
 
 All notable changes to this project are recorded here. Format follows Keep a Changelog.
 
+## [0.4.0] - 2026-10-21
+
+### Added
+
+- A dedicated **Node.js** page with native GTK4 controls for installed NVM, Node LTS, npm and optional Node Current.
+- Separate **Refresh installed**, **Check updates**, and per-tool installation actions; the page runs no remote requests during startup.
+- NVM integration using a short-lived Bash subprocess to load `nvm.sh` safely; remote checks query NVM, Node.js and npm only on demand.
+- Rust version parsing tests, Git tag selection tests, current-major detection tests and local output parsing tests.
+- Scalable Zs SVG and matching PNG icon installed by the AppImage and desktop launcher scripts.
+
+### Changed
+
+- The header now shows **AppImage**, **Node.js**, **About**, **Changelog** and the existing self-update action.
+- Page-navigation icon buttons are transparent unless selected, when soft-blue highlighting is applied.
+- GTK4 `HeaderBar` is used to group minimize/maximize/close buttons more tightly; exact spacing can vary by desktop theme.
+- About text, README, desktop metadata and package version updated for Node.js functionality.
+- Packaging continues to produce `zSoft-Manager-v0.4.0-x86_64.AppImage` plus SHA256 once built on a supported Ubuntu system.
+
+### Safety
+
+- Existing NVM installations are managed without sudo, remote installer execution, automatic version deletion, or background polling.
+- Node LTS remains the default even after optional Node Current installation.
+- System Node.js installations outside NVM are detected but not overwritten.
+- Build and runtime testing must be performed on Ubuntu; source archives are not precompiled AppImages.
+
+
 ## [0.3.0] - 2026-10-21
 
 ### Added

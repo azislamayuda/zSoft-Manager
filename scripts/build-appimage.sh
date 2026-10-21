@@ -15,6 +15,8 @@ install -Dm644 packaging/io.github.azislamayuda.zsoft-manager.desktop \
   "$appdir/usr/share/applications/io.github.azislamayuda.zsoft-manager.desktop"
 install -Dm644 assets/zsoft-manager.png \
   "$appdir/usr/share/icons/hicolor/256x256/apps/zsoft-manager.png"
+install -Dm644 assets/zsoft-manager.svg \
+  "$appdir/usr/share/icons/hicolor/scalable/apps/zsoft-manager.svg"
 # Prefer an explicitly provided tool for offline builds.
 linuxdeploy="${LINUXDEPLOY:-$repo/build/tools/linuxdeploy-x86_64.AppImage}"
 if [[ ! -f "$linuxdeploy" ]]; then

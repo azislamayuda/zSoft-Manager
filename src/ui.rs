@@ -1,6 +1,6 @@
 use crate::{
     config::{self, Source, SourceProvider},
-    info, naming, scan, self_update,
+    info, naming, node_ui, scan, self_update,
     update::{self, CheckState, ReleaseInfo},
 };
 use gtk::{gdk, glib, prelude::*};
@@ -56,6 +56,7 @@ enum Event {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Page {
     Applications,
+    Node,
     About,
     Changelog,
 }
@@ -64,6 +65,7 @@ impl Page {
     fn id(self) -> &'static str {
         match self {
             Self::Applications => "applications",
+            Self::Node => "node",
             Self::About => "about",
             Self::Changelog => "changelog",
         }
@@ -101,6 +103,20 @@ fn set_button_text(button: &gtk::Button, label: &str) {
     }
 }
 
+fn node_icon_button() -> gtk::Button {
+    let button = gtk::Button::new();
+    button.add_css_class("nav-icon-button");
+    button.set_tooltip_text(Some("Node.js / npm / NVM"));
+    let bytes = glib::Bytes::from_static(include_bytes!("../assets/node-mark.png"));
+    let image = match gdk::Texture::from_bytes(&bytes) {
+        Ok(texture) => gtk::Image::from_paintable(Some(&texture)),
+        Err(_) => gtk::Image::from_icon_name("utilities-terminal-symbolic"),
+    };
+    image.set_pixel_size(22);
+    button.set_child(Some(&image));
+    button
+}
+
 fn icon_only_button(icon_name: &str, tooltip: &str) -> gtk::Button {
     let button = gtk::Button::new();
     button.add_css_class("nav-icon-button");
@@ -111,17 +127,28 @@ fn icon_only_button(icon_name: &str, tooltip: &str) -> gtk::Button {
     button
 }
 
-fn navigate(stack: &gtk::Stack, about: &gtk::Button, changelog: &gtk::Button, page: Page) {
-    stack.set_visible_child_name(page.id());
-    if page == Page::About {
-        about.add_css_class("nav-active");
-    } else {
-        about.remove_css_class("nav-active");
-    }
-    if page == Page::Changelog {
-        changelog.add_css_class("nav-active");
-    } else {
-        changelog.remove_css_class("nav-active");
+#[derive(Clone)]
+struct Navigation {
+    stack: gtk::Stack,
+    appimage: gtk::Button,
+    node: gtk::Button,
+    about: gtk::Button,
+    changelog: gtk::Button,
+}
+
+fn navigate(nav: &Navigation, page: Page) {
+    nav.stack.set_visible_child_name(page.id());
+    for (button, destination) in [
+        (&nav.appimage, Page::Applications),
+        (&nav.node, Page::Node),
+        (&nav.about, Page::About),
+        (&nav.changelog, Page::Changelog),
+    ] {
+        if page == destination {
+            button.add_css_class("nav-active");
+        } else {
+            button.remove_css_class("nav-active");
+        }
     }
 }
 
@@ -177,6 +204,14 @@ fn build_ui(app: &gtk::Application) {
         .default_height(720)
         .build();
 
+    // GTK-owned CSD headerbar groups the title controls closer together.
+    // The system still owns minimize/maximize/close behavior.
+    let titlebar = gtk::HeaderBar::new();
+    titlebar.set_show_title_buttons(true);
+    titlebar.set_decoration_layout(Some(":minimize,maximize,close"));
+    titlebar.add_css_class("compact-titlebar");
+    window.set_titlebar(Some(&titlebar));
+
     let root_panel = gtk::Box::new(gtk::Orientation::Vertical, 0);
     root_panel.add_css_class("app-root");
     root_panel.set_margin_top(22);
@@ -200,12 +235,16 @@ fn build_ui(app: &gtk::Application) {
     hero_text.append(&subline);
     hero.append(&hero_text);
 
-    // Two adjacent icon-only navigation buttons. Tooltips provide their names.
+    // Flat icon-only navigation; only the active page has a filled background.
     let navigation = gtk::Box::new(gtk::Orientation::Horizontal, 8);
     navigation.set_valign(gtk::Align::Center);
     navigation.add_css_class("navigation");
+    let appimage_nav = icon_only_button("application-x-executable-symbolic", "AppImage Manager");
+    let node_nav = node_icon_button();
     let about_nav = icon_only_button("help-about-symbolic", "About");
     let changelog_nav = icon_only_button("document-open-recent-symbolic", "Changelog");
+    navigation.append(&appimage_nav);
+    navigation.append(&node_nav);
     navigation.append(&about_nav);
     navigation.append(&changelog_nav);
     let self_button = icon_only_button(
@@ -262,6 +301,10 @@ fn build_ui(app: &gtk::Application) {
     apps_page.append(&scroller);
     stack.add_named(&apps_page, Some(Page::Applications.id()));
 
+    // NODE PAGE: native Rust backend + NVM-managed updates, no background daemon.
+    let node_page = node_ui::build();
+    stack.add_named(&node_page, Some(Page::Node.id()));
+
     // ABOUT PAGE: full in-window page, not a dialog or popover.
     let about_page = gtk::Box::new(gtk::Orientation::Vertical, 16);
     about_page.add_css_class("page");
@@ -282,7 +325,7 @@ fn build_ui(app: &gtk::Application) {
     about_title.set_xalign(0.0);
     about_content.append(&about_title);
     let about_description = gtk::Label::new(Some(
-        "A lightweight, native software and AppImage manager for Ubuntu. Manage GitHub and official KDE Kdenlive updates, keep versionless filenames, and restore a previous version when needed."
+        "A lightweight native software manager for Ubuntu. Manage AppImages from GitHub or KDE, and check or update Node.js LTS, npm and NVM."
     ));
     about_description.set_wrap(true);
     about_description.set_xalign(0.0);
@@ -298,7 +341,7 @@ fn build_ui(app: &gtk::Application) {
     detail_row(
         &details,
         "Update source",
-        "GitHub Releases · KDE Downloads (Kdenlive)",
+        "GitHub Releases · KDE Downloads · nvm-sh · Node.js · npm",
     );
     detail_row(&details, "Network", "On demand only · No background daemon");
     about_content.append(&details);
@@ -351,7 +394,14 @@ fn build_ui(app: &gtk::Application) {
     changelog_scroll.set_child(Some(&changelog_view));
     changelog_page.append(&changelog_scroll);
     stack.add_named(&changelog_page, Some(Page::Changelog.id()));
-    navigate(&stack, &about_nav, &changelog_nav, Page::Applications);
+    let nav = Navigation {
+        stack: stack.clone(),
+        appimage: appimage_nav.clone(),
+        node: node_nav.clone(),
+        about: about_nav.clone(),
+        changelog: changelog_nav.clone(),
+    };
+    navigate(&nav, Page::Applications);
     root_panel.append(&stack);
 
     // Fixed footer, visible on every page.
@@ -425,24 +475,18 @@ fn build_ui(app: &gtk::Application) {
     overlay.add_overlay(&toast);
     window.set_child(Some(&overlay));
 
-    {
-        let stack = stack.clone();
-        let about = about_nav.clone();
-        let changelog = changelog_nav.clone();
-        about_nav.connect_clicked(move |_| navigate(&stack, &about, &changelog, Page::About));
-    }
-    {
-        let stack = stack.clone();
-        let about = about_nav.clone();
-        let changelog = changelog_nav.clone();
-        changelog_nav
-            .connect_clicked(move |_| navigate(&stack, &about, &changelog, Page::Changelog));
+    for (page, button) in [
+        (Page::Applications, appimage_nav.clone()),
+        (Page::Node, node_nav.clone()),
+        (Page::About, about_nav.clone()),
+        (Page::Changelog, changelog_nav.clone()),
+    ] {
+        let nav = nav.clone();
+        button.connect_clicked(move |_| navigate(&nav, page));
     }
     for back in [about_back, changelog_back] {
-        let stack = stack.clone();
-        let about = about_nav.clone();
-        let changelog = changelog_nav.clone();
-        back.connect_clicked(move |_| navigate(&stack, &about, &changelog, Page::Applications));
+        let nav = nav.clone();
+        back.connect_clicked(move |_| navigate(&nav, Page::Applications));
     }
     {
         let status = footer.clone();
@@ -1510,12 +1554,14 @@ mod ui_tests {
     fn stack_pages_have_unique_names() {
         let ids = [
             Page::Applications.id(),
+            Page::Node.id(),
             Page::About.id(),
             Page::Changelog.id(),
         ];
-        assert_eq!(ids, ["applications", "about", "changelog"]);
+        assert_eq!(ids, ["applications", "node", "about", "changelog"]);
         assert_ne!(ids[0], ids[1]);
         assert_ne!(ids[1], ids[2]);
+        assert_ne!(ids[2], ids[3]);
     }
 
     #[test]

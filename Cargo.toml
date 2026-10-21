@@ -1,6 +1,6 @@
 [package]
 name = "zsoft-manager"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 rust-version = "1.83"
 description = "Lightweight native software and AppImage manager for Ubuntu"

@@ -1,8 +1,8 @@
 [Desktop Entry]
 Type=Application
 Name=zSoft Manager
-GenericName=AppImage Manager
-Comment=Native Rust/GTK4 software update manager
+GenericName=AppImage and Node.js Manager
+Comment=Check AppImage, Node.js, npm and NVM updates with a native GTK4 interface
 Exec=zsoft-manager
 Icon=zsoft-manager
 Terminal=false
