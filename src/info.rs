@@ -31,9 +31,9 @@ mod tests {
     }
 
     #[test]
-    fn four_part_release_label_maps_to_valid_cargo_semver() {
-        assert_eq!(CARGO_VERSION, "0.4.2+1");
-        assert_eq!(release_version(), "0.4.2.1");
+    fn release_label_matches_cargo_semver() {
+        assert_eq!(CARGO_VERSION, "0.4.3");
+        assert_eq!(release_version(), "0.4.3");
     }
 
     #[test]

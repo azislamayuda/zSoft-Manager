@@ -46,7 +46,7 @@ struct Model {
 enum Event {
     Checked(PathBuf, Result<(ReleaseInfo, CheckState), String>),
     Updated(PathBuf, Result<String, String>),
-    SelfChecked(Result<(ReleaseInfo, CheckState), String>),
+    SelfChecked(Result<self_update::SelfUpdateStatus, String>),
     SelfInstalled(Result<String, String>),
     Done { refresh_list: bool },
 }
@@ -117,6 +117,26 @@ fn set_button_text(button: &gtk::Button, label: &str) {
         {
             text.set_text(label);
         }
+    }
+}
+
+fn mark_self_update_retry(model: &Rc<RefCell<Model>>, retry: bool) {
+    let m = model.borrow();
+    m.self_button.set_tooltip_text(Some(if retry {
+        "Retry: the GitHub release assets are not ready yet"
+    } else {
+        "Check zSoft Manager updates"
+    }));
+    if let Some(image) = m
+        .self_button
+        .child()
+        .and_then(|child| child.downcast::<gtk::Image>().ok())
+    {
+        image.set_icon_name(Some(if retry {
+            "view-refresh-symbolic"
+        } else {
+            "software-update-available-symbolic"
+        }));
     }
 }
 
@@ -306,13 +326,14 @@ fn build_ui(app: &gtk::Application) {
     apps_page.append(&scroller);
     stack.add_named(&apps_page, Some(Page::Applications.id()));
 
-    // NODE PAGE: native Rust backend + NVM-managed updates, no background daemon.
-    let node_page = node_ui::build();
+    // Build heavy toolchain pages only when opened. This avoids starting Node
+    // subprocesses at startup and reduces GTK widget allocations on AppImage-only sessions.
+    let node_page = gtk::Box::new(gtk::Orientation::Vertical, 0);
     stack.add_named(&node_page, Some(Page::Node.id()));
-
-    // PYTHON PAGE: manage one explicit virtual environment; no global pip changes.
-    let python_page = python_ui::build();
+    let python_page = gtk::Box::new(gtk::Orientation::Vertical, 0);
     stack.add_named(&python_page, Some(Page::Python.id()));
+    let node_loaded = Rc::new(Cell::new(false));
+    let python_loaded = Rc::new(Cell::new(false));
 
     // ABOUT PAGE: full in-window page, not a dialog or popover.
     let about_page = gtk::Box::new(gtk::Orientation::Vertical, 16);
@@ -493,7 +514,19 @@ fn build_ui(app: &gtk::Application) {
         (Page::Changelog, changelog_nav.clone()),
     ] {
         let nav = nav.clone();
-        button.connect_clicked(move |_| navigate(&nav, page));
+        let node_page = node_page.clone();
+        let python_page = python_page.clone();
+        let node_loaded = node_loaded.clone();
+        let python_loaded = python_loaded.clone();
+        button.connect_clicked(move |_| {
+            if page == Page::Node && !node_loaded.replace(true) {
+                node_page.append(&node_ui::build());
+            }
+            if page == Page::Python && !python_loaded.replace(true) {
+                python_page.append(&python_ui::build());
+            }
+            navigate(&nav, page);
+        });
     }
     for back in [about_back, changelog_back] {
         let nav = nav.clone();
@@ -626,6 +659,7 @@ fn check_self_update(model: &Rc<RefCell<Model>>) {
         m.footer
             .set_text("Checking zSoft Manager releases on GitHub…");
     }
+    mark_self_update_retry(model, false);
     notify(model, Notice::Info, "Checking zSoft Manager updates…");
     update_control_state(model);
     let (tx, rx) = mpsc::channel();
@@ -687,14 +721,27 @@ fn rescan(model: &Rc<RefCell<Model>>) {
     };
     {
         let mut m = model.borrow_mut();
-        while let Some(row) = m.list.first_child() {
-            m.list.remove(&row);
-        }
-        m.entries.clear();
         m.count.set_text(&format!(
             "{} AppImages found · Subfolders only · ArtCraft excluded",
             files.len()
         ));
+        // Preserve existing GTK rows, callbacks and labels when the paths did not change.
+        // Rebuilding a large list on every Rescan creates avoidable allocations.
+        if files.len() == m.entries.len()
+            && files
+                .iter()
+                .zip(&m.entries)
+                .all(|(found, entry)| found == &entry.path)
+        {
+            m.footer.set_text("Scan complete. AppImage list unchanged.");
+            drop(m);
+            update_control_state(model);
+            return;
+        }
+        while let Some(row) = m.list.first_child() {
+            m.list.remove(&row);
+        }
+        m.entries.clear();
     }
     for path in files {
         let line = gtk::Box::new(gtk::Orientation::Horizontal, 14);
@@ -1402,6 +1449,7 @@ fn receive_events(model: Rc<RefCell<Model>>, rx: mpsc::Receiver<Event>) {
     let mut check_available = 0usize;
     let mut check_failed = 0usize;
     let mut self_result: Option<Result<String, String>> = None;
+    let mut pending_self_check: Option<String> = None;
     glib::timeout_add_local(Duration::from_millis(180), move || {
         while let Ok(event) = rx.try_recv() {
             match event {
@@ -1464,30 +1512,43 @@ fn receive_events(model: Rc<RefCell<Model>>, rx: mpsc::Receiver<Event>) {
                     }
                 }
                 Event::SelfChecked(result) => match result {
-                    Ok((info, CheckState::Available)) => {
+                    Ok(self_update::SelfUpdateStatus::Ready(info, CheckState::Available)) => {
                         let tag = info.tag.clone();
                         model.borrow_mut().self_release = Some(info);
-                        notify(&model, Notice::Success, &format!("zSoft Manager {tag} available. Click the Update icon again to install."));
+                        mark_self_update_retry(&model, false);
+                        notify(&model, Notice::Success,
+                                &format!("zSoft Manager {tag} is verified and ready. Click Update again to install."));
                     }
-                    Ok((info, CheckState::UpToDate)) => {
+                    Ok(self_update::SelfUpdateStatus::Ready(info, CheckState::UpToDate)) => {
+                        mark_self_update_retry(&model, false);
                         notify(
                             &model,
                             Notice::Success,
                             &format!("zSoft Manager is up to date ({})", info.tag),
                         );
                     }
-                    Ok((_, CheckState::Uncertain)) => {
+                    Ok(self_update::SelfUpdateStatus::Ready(_, CheckState::Uncertain)) => {
                         notify(
                             &model,
                             Notice::Error,
-                            "The release version could not be compared safely",
+                            "Release version could not be compared safely",
                         );
                     }
+                    Ok(self_update::SelfUpdateStatus::Pending { tag, reason }) => {
+                        let message = format!(
+                            "Release {tag} found, but not ready: {reason}. Click Update to retry."
+                        );
+                        model.borrow().footer.set_text(&message);
+                        pending_self_check = Some(message.clone());
+                        mark_self_update_retry(&model, true);
+                        notify(&model, Notice::Info, &message);
+                    }
                     Err(error) => {
+                        mark_self_update_retry(&model, true);
                         notify(
                             &model,
                             Notice::Error,
-                            &format!("Self-update check failed: {error}"),
+                            &format!("Self-update check failed: {error}. Click Update to retry."),
                         );
                     }
                 },
@@ -1506,6 +1567,8 @@ fn receive_events(model: Rc<RefCell<Model>>, rx: mpsc::Receiver<Event>) {
                         } else {
                             "Self-update failed. The previous AppImage was preserved.".to_owned()
                         }
+                    } else if let Some(reason) = pending_self_check.take() {
+                        reason
                     } else if !refresh_list {
                         "Check complete. You can update or set a stable filename.".to_owned()
                     } else if update_errors.is_empty() {

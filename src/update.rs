@@ -30,6 +30,24 @@ pub enum CheckState {
     Uncertain,
 }
 
+/// A release can be public before its AppImage and checksum are uploaded.
+/// This is an expected transient state, not a wrong configuration.
+#[derive(Debug)]
+pub enum CheckOutcome {
+    Ready(ReleaseInfo, CheckState),
+    Pending { tag: String, reason: String },
+}
+
+enum GithubResponse {
+    Ready(ReleaseInfo),
+    Pending { tag: String, reason: String },
+}
+
+enum AssetPick<'a> {
+    Ready(&'a Asset),
+    Pending(&'static str),
+}
+
 #[derive(Deserialize)]
 struct Release {
     tag_name: String,
@@ -39,6 +57,8 @@ struct Release {
 #[derive(Deserialize)]
 struct Asset {
     name: String,
+    #[serde(default)]
+    state: Option<String>,
     browser_download_url: String,
     #[serde(default)]
     digest: Option<String>,
@@ -50,6 +70,22 @@ pub fn check(
     original: &Path,
     saved_tag: Option<&str>,
 ) -> Result<(ReleaseInfo, CheckState), String> {
+    match check_with_readiness(source, original, saved_tag, false)? {
+        CheckOutcome::Ready(info, state) => Ok((info, state)),
+        CheckOutcome::Pending { tag, reason } => Err(format!(
+            "Release {tag} is published but not ready: {reason}. Try again later."
+        )),
+    }
+}
+
+/// A self-update must have a verified SHA256 (GitHub digest or published sidecar).
+/// Other AppImage providers retain their previous compatibility behavior.
+pub fn check_with_readiness(
+    source: &Source,
+    original: &Path,
+    saved_tag: Option<&str>,
+    require_checksum: bool,
+) -> Result<CheckOutcome, String> {
     if source.provider == SourceProvider::Github && !config::valid_repository(&source.repository) {
         return Err("Repository must be owner/repo".into());
     }
@@ -61,7 +97,12 @@ pub fn check(
         return Err("Invalid stable filename: use name.AppImage without a path".into());
     }
     let info = match source.provider {
-        SourceProvider::Github => check_github(source, stable_filename)?,
+        SourceProvider::Github => match check_github(source, stable_filename, require_checksum)? {
+            GithubResponse::Ready(info) => info,
+            GithubResponse::Pending { tag, reason } => {
+                return Ok(CheckOutcome::Pending { tag, reason })
+            }
+        },
         SourceProvider::KdeKdenlive => {
             if std::env::consts::ARCH != "x86_64" {
                 return Err("Official KDE Kdenlive AppImage provider requires x86_64 Linux".into());
@@ -89,7 +130,7 @@ pub fn check(
         _ if saved_tag == Some(info.tag.as_str()) => CheckState::UpToDate,
         _ => CheckState::Uncertain,
     };
-    Ok((info, state))
+    Ok(CheckOutcome::Ready(info, state))
 }
 
 const KDE_ROOT: &str = "https://download.kde.org/stable/kdenlive/";
@@ -304,17 +345,150 @@ fn check_kde_kdenlive(source: &Source, stable_filename: String) -> Result<Releas
     Err("No stable Kdenlive x86_64 AppImage found on KDE's official server".into())
 }
 
-fn check_github(source: &Source, stable_filename: String) -> Result<ReleaseInfo, String> {
-    let api = format!(
-        "https://api.github.com/repos/{}/releases/latest",
-        source.repository
-    );
-    let out = Command::new("curl")
+/// The selection is fully testable offline with a small deserialized fixture.
+fn select_asset<'a>(
+    release: &'a Release,
+    pattern: &str,
+    require_checksum: bool,
+) -> Result<AssetPick<'a>, String> {
+    // Scan borrowed release assets without allocating a second Vec of matches.
+    let mut matching = release.assets.iter().filter(|asset| {
+        asset.name.to_ascii_lowercase().ends_with(".appimage")
+            && config::wildmatch(pattern, &asset.name)
+    });
+    let Some(asset) = matching.next() else {
+        let any_appimages = release
+            .assets
+            .iter()
+            .any(|entry| entry.name.to_ascii_lowercase().ends_with(".appimage"));
+        return if any_appimages {
+            Err(format!(
+                "No AppImage matches '{pattern}'. Check the asset pattern."
+            ))
+        } else {
+            Ok(AssetPick::Pending(
+                "The AppImage asset has not been uploaded yet",
+            ))
+        };
+    };
+    if matching.next().is_some() {
+        return Err(format!(
+            "More than one AppImage matches '{pattern}'. Refine the asset pattern."
+        ));
+    }
+    if asset.size == 0
+        || asset
+            .state
+            .as_deref()
+            .is_some_and(|state| state != "uploaded")
+    {
+        return Ok(AssetPick::Pending("The AppImage upload is not complete"));
+    }
+    if require_checksum && asset.digest.is_none() {
+        let sidecar_name = format!("{}.sha256", asset.name);
+        let sidecar = release
+            .assets
+            .iter()
+            .find(|candidate| candidate.name == sidecar_name);
+        if sidecar.is_none_or(|value| {
+            value.size == 0
+                || value
+                    .state
+                    .as_deref()
+                    .is_some_and(|state| state != "uploaded")
+        }) {
+            return Ok(AssetPick::Pending(
+                "The SHA256 checksum has not been uploaded yet",
+            ));
+        }
+    }
+    Ok(AssetPick::Ready(asset))
+}
+
+fn sha256_digest(value: &str) -> Option<String> {
+    let digest = value.strip_prefix("sha256:").unwrap_or(value);
+    (digest.len() == 64 && digest.bytes().all(|b| b.is_ascii_hexdigit()))
+        .then(|| digest.to_ascii_lowercase())
+}
+
+/// Accept `HASH` or sha256sum's `HASH  filename`; reject other filenames.
+fn parse_sha256_sidecar(text: &str, expected_filename: &str) -> Option<String> {
+    let mut lines = text.lines().filter(|line| !line.trim().is_empty());
+    let line = lines.next()?;
+    if lines.next().is_some() {
+        return None;
+    }
+    let mut columns = line.split_whitespace();
+    let digest = sha256_digest(columns.next()?)?;
+    if let Some(filename) = columns.next() {
+        if filename.trim_start_matches('*') != expected_filename {
+            return None;
+        }
+    }
+    if columns.next().is_some() {
+        return None;
+    }
+    Some(digest)
+}
+
+fn safe_asset_url(repo: &str, url: &str) -> bool {
+    url.starts_with(&format!("https://github.com/{repo}/releases/download/"))
+}
+
+fn download_sha256_sidecar(url: &str, expected_filename: &str) -> Result<String, String> {
+    let output = Command::new("curl")
         .args([
             "--fail",
             "--silent",
             "--show-error",
             "--location",
+            "--max-redirs",
+            "5",
+            "--proto",
+            "=https",
+            "--proto-redir",
+            "=https",
+            "--connect-timeout",
+            "10",
+            "--max-time",
+            "20",
+            "--max-filesize",
+            "4096",
+            "--header",
+            "Cache-Control: no-cache",
+        ])
+        .arg(url)
+        .output()
+        .map_err(|e| format!("Could not check SHA256 asset: {e}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "SHA256 asset is not downloadable yet: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    let content =
+        String::from_utf8(output.stdout).map_err(|_| "SHA256 asset must be UTF-8".to_string())?;
+    parse_sha256_sidecar(&content, expected_filename)
+        .ok_or_else(|| "The published SHA256 asset has invalid content".into())
+}
+
+fn check_github(
+    source: &Source,
+    stable_filename: String,
+    require_checksum: bool,
+) -> Result<GithubResponse, String> {
+    let api = format!(
+        "https://api.github.com/repos/{}/releases/latest",
+        source.repository
+    );
+    let output = Command::new("curl")
+        .args([
+            "--fail",
+            "--silent",
+            "--show-error",
+            "--location",
+            "--max-redirs",
+            "5",
             "--proto",
             "=https",
             "--proto-redir",
@@ -323,73 +497,70 @@ fn check_github(source: &Source, stable_filename: String) -> Result<ReleaseInfo,
             "10",
             "--max-time",
             "30",
+            "--max-filesize",
+            "2097152",
             "--header",
             "Accept: application/vnd.github+json",
             "--header",
-            "User-Agent: zSoft-Manager/0.3.0",
-            &api,
+            "Cache-Control: no-cache",
+            "--header",
+            "User-Agent: zSoft-Manager/0.4.3",
         ])
+        .arg(&api)
         .output()
         .map_err(|e| format!("Cannot run curl: {e}"))?;
-    if !out.status.success() {
+    if !output.status.success() {
         return Err(format!(
             "GitHub API request failed: {}",
-            String::from_utf8_lossy(&out.stderr).trim()
+            String::from_utf8_lossy(&output.stderr).trim()
         ));
     }
-    let release: Release = serde_json::from_slice(&out.stdout)
+    let release: Release = serde_json::from_slice(&output.stdout)
         .map_err(|e| format!("Invalid GitHub release response: {e}"))?;
-    let candidates: Vec<_> = release
-        .assets
-        .iter()
-        .filter(|a| {
-            a.name.to_ascii_lowercase().ends_with(".appimage")
-                && config::wildmatch(&source.asset_pattern, &a.name)
-        })
-        .collect();
-    if candidates.len() != 1 {
-        return Err(format!(
-            "Expected one AppImage asset matching '{}'; found {}. Adjust the asset pattern.",
-            source.asset_pattern,
-            candidates.len()
-        ));
-    }
-    let asset = candidates[0];
-    let prefix = format!(
-        "https://github.com/{}/releases/download/",
-        source.repository
-    );
-    if !asset
-        .browser_download_url
-        .to_ascii_lowercase()
-        .starts_with(&prefix.to_ascii_lowercase())
-    {
-        return Err("Release asset URL is not within the configured GitHub repository".into());
-    }
-    if asset.size == 0 {
-        return Err("GitHub reports an empty release asset".into());
-    }
-    let sha256 = match asset.digest.as_deref() {
-        None => None,
-        Some(s) => {
-            let d = s
-                .strip_prefix("sha256:")
-                .ok_or("Unsupported asset checksum format")?;
-            if d.len() != 64 || !d.bytes().all(|b| b.is_ascii_hexdigit()) {
-                return Err("Invalid GitHub SHA256 digest".into());
-            }
-            Some(d.to_ascii_lowercase())
+    let asset = match select_asset(&release, &source.asset_pattern, require_checksum)? {
+        AssetPick::Ready(asset) => asset,
+        AssetPick::Pending(reason) => {
+            return Ok(GithubResponse::Pending {
+                tag: release.tag_name.clone(),
+                reason: reason.into(),
+            })
         }
     };
-    let info = ReleaseInfo {
-        tag: release.tag_name,
+    if !safe_asset_url(&source.repository, &asset.browser_download_url) {
+        return Err("Release asset URL is not within the configured GitHub repository".into());
+    }
+    let sha256 = match asset.digest.as_deref() {
+        Some(value) => Some(sha256_digest(value).ok_or("Invalid GitHub SHA256 digest")?),
+        None if require_checksum => {
+            let sidecar_name = format!("{}.sha256", asset.name);
+            let sidecar = release
+                .assets
+                .iter()
+                .find(|entry| entry.name == sidecar_name)
+                .ok_or("SHA256 sidecar is missing")?;
+            if !safe_asset_url(&source.repository, &sidecar.browser_download_url) {
+                return Err("Checksum URL is not within the configured GitHub repository".into());
+            }
+            match download_sha256_sidecar(&sidecar.browser_download_url, &asset.name) {
+                Ok(digest) => Some(digest),
+                Err(reason) => {
+                    return Ok(GithubResponse::Pending {
+                        tag: release.tag_name.clone(),
+                        reason,
+                    })
+                }
+            }
+        }
+        None => None,
+    };
+    Ok(GithubResponse::Ready(ReleaseInfo {
+        tag: release.tag_name.clone(),
         asset_name: asset.name.clone(),
         url: asset.browser_download_url.clone(),
         sha256,
         size: asset.size,
         stable_filename,
-    };
-    Ok(info)
+    }))
 }
 
 // Conservative dotted-numeric versions. Unknown release schemes need manual one-at-a-time updating.
@@ -1001,5 +1172,56 @@ mod tests {
         assert_eq!(fs::read(&old).unwrap(), b"old");
         assert_eq!(fs::read(&target).unwrap(), b"other");
         fs::remove_dir_all(&dir).unwrap();
+    }
+    #[test]
+    fn published_release_without_assets_is_pending_not_bad_pattern() {
+        let release: Release =
+            serde_json::from_str(r#"{"tag_name":"v0.4.3","assets":[]}"#).unwrap();
+        assert!(matches!(
+            select_asset(&release, "zSoft-Manager-*-x86_64.AppImage", true),
+            Ok(AssetPick::Pending(_))
+        ));
+    }
+    #[test]
+    fn appimage_without_checksum_is_not_ready_for_self_update() {
+        let release: Release = serde_json::from_str(r#"{"tag_name":"v0.4.3","assets":[
+            {"name":"zSoft-Manager-v0.4.3-x86_64.AppImage","browser_download_url":"https://github.com/azislamayuda/zSoft-Manager/releases/download/v0.4.3/app","size":1024,"state":"uploaded"}
+        ]}"#).unwrap();
+        assert!(matches!(
+            select_asset(&release, "zSoft-Manager-*-x86_64.AppImage", true),
+            Ok(AssetPick::Pending(_))
+        ));
+        assert!(matches!(
+            select_asset(&release, "zSoft-Manager-*-x86_64.AppImage", false),
+            Ok(AssetPick::Ready(_))
+        ));
+    }
+    #[test]
+    fn other_appimage_name_is_configuration_error() {
+        let release: Release = serde_json::from_str(r#"{"tag_name":"v1","assets":[
+            {"name":"other-x86_64.AppImage","browser_download_url":"https://github.com/owner/repo/releases/download/v1/other","size":1}
+        ]}"#).unwrap();
+        assert!(select_asset(&release, "zSoft-Manager-*.AppImage", true).is_err());
+    }
+    #[test]
+    fn checksum_sidecar_parser_rejects_another_filename() {
+        let hash = "a".repeat(64);
+        assert!(
+            parse_sha256_sidecar(&format!("{hash}  other.AppImage"), "zSoft.AppImage").is_none()
+        );
+        assert_eq!(
+            parse_sha256_sidecar(&format!("{hash} *zSoft.AppImage"), "zSoft.AppImage"),
+            Some(hash)
+        );
+    }
+    #[test]
+    fn valid_digest_can_make_release_ready_without_sidecar() {
+        let release: Release = serde_json::from_str(&format!(r#"{{"tag_name":"v0.4.3","assets":[
+            {{"name":"zSoft-Manager-v0.4.3-x86_64.AppImage","browser_download_url":"https://github.com/azislamayuda/zSoft-Manager/releases/download/v0.4.3/app","size":1024,"state":"uploaded","digest":"sha256:{}"}}
+        ]}}"#, "a".repeat(64))).unwrap();
+        assert!(matches!(
+            select_asset(&release, "zSoft-Manager-*-x86_64.AppImage", true),
+            Ok(AssetPick::Ready(_))
+        ));
     }
 }

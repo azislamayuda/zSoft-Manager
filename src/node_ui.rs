@@ -242,73 +242,75 @@ fn make_badge(phase: &NodePhase) -> gtk::Label {
     badge
 }
 fn update(model: &Rc<RefCell<Ui>>) {
-    let (v, busy, installed_rows, global_rows) = {
-        let m = model.borrow();
-        let v = m.versions.clone();
-        m.refresh.set_sensitive(!m.busy);
-        m.check.set_sensitive(!m.busy);
-        m.active.set_text(&format!(
-            "Active Node: {}",
-            show_value(v.node_active.as_deref())
-        ));
-        m.path.set_text(&format!(
-            "Node path: {}",
-            show_value(v.node_path.as_deref())
-        ));
-        m.default_node.set_text(&format!(
-            "NVM default: {}{}",
-            show_value(v.default_node.as_deref()),
-            v.default_alias
-                .as_deref()
-                .map(|s| format!(" (alias: {s})"))
-                .unwrap_or_default()
-        ));
-        let phase = v
-            .schedule
-            .classify(v.node_active.as_deref().unwrap_or(""), &v.checked_on);
-        m.phase.set_text(phase.label());
-        for css in [
-            "node-badge-lts",
-            "node-badge-current",
-            "node-badge-eol",
-            "node-badge-unknown",
-        ] {
-            m.phase.remove_css_class(css);
-        }
-        m.phase.add_css_class(phase.css());
-        m.phase.set_tooltip_text(Some(&phase.detail()));
-        set_row(
-            &m.nvm,
-            v.nvm.as_deref(),
-            v.nvm_latest.as_deref(),
-            !m.busy && v.nvm_git_checkout && node::newer(v.nvm.as_deref(), v.nvm_latest.as_deref()),
-        );
-        set_row(
-            &m.lts,
-            v.lts.as_deref(),
-            v.lts_latest.as_deref(),
-            !m.busy && v.nvm_available && node::newer(v.lts.as_deref(), v.lts_latest.as_deref()),
-        );
-        set_row(
-            &m.npm,
-            v.npm.as_deref(),
-            v.npm_latest.as_deref(),
-            !m.busy
-                && v.nvm_available
-                && v.lts.is_some()
-                && node::newer(v.npm.as_deref(), v.npm_latest.as_deref()),
-        );
-        set_row(
-            &m.current,
-            v.current.as_deref(),
-            v.current_latest.as_deref(),
-            !m.busy
-                && v.nvm_available
-                && node::newer(v.current.as_deref(), v.current_latest.as_deref()),
-        );
-        (v, m.busy, m.installed_rows.clone(), m.global_rows.clone())
-    };
-    clear(&installed_rows);
+    // Borrow the snapshot while rendering instead of cloning the release schedule,
+    // Node inventory and npm package lists on every UI refresh.
+    let m = model.borrow();
+    let v = &m.versions;
+    let busy = m.busy;
+    let installed_rows = &m.installed_rows;
+    let global_rows = &m.global_rows;
+    m.refresh.set_sensitive(!m.busy);
+    m.check.set_sensitive(!m.busy);
+    m.active.set_text(&format!(
+        "Active Node: {}",
+        show_value(v.node_active.as_deref())
+    ));
+    m.path.set_text(&format!(
+        "Node path: {}",
+        show_value(v.node_path.as_deref())
+    ));
+    m.default_node.set_text(&format!(
+        "NVM default: {}{}",
+        show_value(v.default_node.as_deref()),
+        v.default_alias
+            .as_deref()
+            .map(|s| format!(" (alias: {s})"))
+            .unwrap_or_default()
+    ));
+    let phase = v
+        .schedule
+        .classify(v.node_active.as_deref().unwrap_or(""), &v.checked_on);
+    m.phase.set_text(phase.label());
+    for css in [
+        "node-badge-lts",
+        "node-badge-current",
+        "node-badge-eol",
+        "node-badge-unknown",
+    ] {
+        m.phase.remove_css_class(css);
+    }
+    m.phase.add_css_class(phase.css());
+    m.phase.set_tooltip_text(Some(&phase.detail()));
+    set_row(
+        &m.nvm,
+        v.nvm.as_deref(),
+        v.nvm_latest.as_deref(),
+        !m.busy && v.nvm_git_checkout && node::newer(v.nvm.as_deref(), v.nvm_latest.as_deref()),
+    );
+    set_row(
+        &m.lts,
+        v.lts.as_deref(),
+        v.lts_latest.as_deref(),
+        !m.busy && v.nvm_available && node::newer(v.lts.as_deref(), v.lts_latest.as_deref()),
+    );
+    set_row(
+        &m.npm,
+        v.npm.as_deref(),
+        v.npm_latest.as_deref(),
+        !m.busy
+            && v.nvm_available
+            && v.lts.is_some()
+            && node::newer(v.npm.as_deref(), v.npm_latest.as_deref()),
+    );
+    set_row(
+        &m.current,
+        v.current.as_deref(),
+        v.current_latest.as_deref(),
+        !m.busy
+            && v.nvm_available
+            && node::newer(v.current.as_deref(), v.current_latest.as_deref()),
+    );
+    clear(installed_rows);
     if v.installed_nodes.is_empty() {
         installed_rows.append(&plain_text(
             "No NVM-managed Node.js versions found.",
@@ -346,7 +348,7 @@ fn update(model: &Rc<RefCell<Ui>>) {
         line.append(&switch);
         installed_rows.append(&line);
     }
-    clear(&global_rows);
+    clear(global_rows);
     if v.global_packages.is_empty() {
         global_rows.append(&plain_text(
             "No global npm packages found for the default NVM Node.",
@@ -497,12 +499,16 @@ fn install(model: &Rc<RefCell<Ui>>, kind: Install) {
     if model.borrow().busy {
         return;
     }
-    let v = model.borrow().versions.clone();
-    let (target, allowed) = match kind {
-        Install::Nvm => (v.nvm_latest, v.nvm_git_checkout),
-        Install::Lts => (v.lts_latest, v.nvm_available),
-        Install::Npm => (v.npm_latest, v.nvm_available && v.lts.is_some()),
-        Install::Current => (v.current_latest, v.nvm_available),
+    let (target, allowed) = {
+        let model_ref = model.borrow();
+        let v = &model_ref.versions;
+        // Only clone the one version that the chosen install action needs.
+        match kind {
+            Install::Nvm => (v.nvm_latest.clone(), v.nvm_git_checkout),
+            Install::Lts => (v.lts_latest.clone(), v.nvm_available),
+            Install::Npm => (v.npm_latest.clone(), v.nvm_available && v.lts.is_some()),
+            Install::Current => (v.current_latest.clone(), v.nvm_available),
+        }
     };
     let Some(version) = target.filter(|_| allowed) else {
         return;

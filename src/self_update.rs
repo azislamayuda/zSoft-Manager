@@ -7,7 +7,9 @@ use crate::{
 };
 use std::{
     fs,
+    io::Read,
     path::{Path, PathBuf},
+    process::Command,
 };
 
 pub const REPOSITORY: &str = "azislamayuda/zSoft-Manager";
@@ -25,14 +27,24 @@ fn source() -> Source {
     }
 }
 
-pub fn check_release() -> Result<(ReleaseInfo, CheckState), String> {
-    // This is a *check* only, so it also works when launched with cargo run.
-    // Explicit installed version avoids interpreting filenames as versions.
-    update::check(
+pub enum SelfUpdateStatus {
+    Ready(ReleaseInfo, CheckState),
+    Pending { tag: String, reason: String },
+}
+
+pub fn check_release() -> Result<SelfUpdateStatus, String> {
+    // A release may exist while GitHub is still receiving its AppImage/checksum.
+    match update::check_with_readiness(
         &source(),
         Path::new(STABLE_FILENAME),
         Some(&info::release_version()),
-    )
+        true,
+    )? {
+        update::CheckOutcome::Ready(info, state) => Ok(SelfUpdateStatus::Ready(info, state)),
+        update::CheckOutcome::Pending { tag, reason } => {
+            Ok(SelfUpdateStatus::Pending { tag, reason })
+        }
+    }
 }
 
 fn allowed_parent(root: &Path, parent: &Path) -> bool {
@@ -76,10 +88,56 @@ pub fn running_appimage() -> Result<PathBuf, String> {
     Ok(path)
 }
 
+fn verify_installed(path: &Path, release: &ReleaseInfo) -> Result<(), String> {
+    let metadata = fs::symlink_metadata(path).map_err(|e| e.to_string())?;
+    if !metadata.file_type().is_file() || metadata.len() != release.size {
+        return Err(
+            "Installed AppImage size or file type differs from the verified download".into(),
+        );
+    }
+    let mut file = fs::File::open(path).map_err(|e| e.to_string())?;
+    let mut magic = [0u8; 4];
+    file.read_exact(&mut magic).map_err(|e| e.to_string())?;
+    if magic != *b"\x7fELF" {
+        return Err("Installed AppImage ELF header is invalid".into());
+    }
+    if let Some(expected) = &release.sha256 {
+        let output = Command::new("sha256sum")
+            .arg(path)
+            .output()
+            .map_err(|e| format!("Post-install SHA256 check failed: {e}"))?;
+        if !output.status.success() {
+            return Err("Post-install SHA256 verification failed".into());
+        }
+        let found = String::from_utf8_lossy(&output.stdout);
+        if !found
+            .split_whitespace()
+            .next()
+            .unwrap_or("")
+            .eq_ignore_ascii_case(expected)
+        {
+            return Err("Installed AppImage SHA256 mismatch".into());
+        }
+    }
+    Ok(())
+}
+
 pub fn install_release(release: &ReleaseInfo) -> Result<String, String> {
     let file = running_appimage()?;
-    // update::install validates size/ELF/checksum, backs up and preserves old launcher links.
-    update::install(&file, release)
+    // update::install first verifies the download, then retains the old file for rollback.
+    let result = update::install(&file, release)?;
+    let installed_path = file.with_file_name(&release.stable_filename);
+    if let Err(error) = verify_installed(&installed_path, release) {
+        return match update::rollback(&installed_path) {
+            Ok(()) => Err(format!(
+                "Post-install verification failed ({error}); previous version restored"
+            )),
+            Err(restore_error) => Err(format!(
+                "Post-install verification failed ({error}); rollback failed: {restore_error}"
+            )),
+        };
+    }
+    Ok(format!("{result}; post-install verification passed"))
 }
 
 #[cfg(test)]
@@ -115,5 +173,33 @@ mod tests {
     #[test]
     fn running_without_appimage_does_not_install() {
         assert!(!Path::new("some.AppImage").is_absolute());
+    }
+    #[test]
+    fn post_install_verification_detects_bad_size_and_bad_header() {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "zsoft-postverify-{}-{nonce}.AppImage",
+            std::process::id()
+        ));
+        fs::write(&path, b"\x7fELFpayload").unwrap();
+        let release = ReleaseInfo {
+            tag: "v0.4.3".into(),
+            asset_name: "test.AppImage".into(),
+            url: String::new(),
+            sha256: None,
+            size: 11,
+            stable_filename: "test.AppImage".into(),
+        };
+        assert!(verify_installed(&path, &release).is_ok());
+        let mut wrong = release.clone();
+        wrong.size = 12;
+        assert!(verify_installed(&path, &wrong).is_err());
+        fs::write(&path, b"BAD!payload").unwrap();
+        assert!(verify_installed(&path, &release).is_err());
+        fs::remove_file(path).unwrap();
     }
 }

@@ -136,3 +136,12 @@ Copyright (c) 2026 Azis Lamayuda. **Personal and non-commercial use only. No sal
 - `.github/workflows/release-appimage.yml` — CI build / release
 
 Please use the issue tracker for feedback and bug reports.
+
+
+## v0.4.3 self-update readiness and performance
+
+Self-update checks only offer installation after a matching published AppImage and a valid SHA256 digest (GitHub API digest or `.AppImage.sha256` release asset) are available. If GitHub has published the release before uploading its files, the in-app header icon becomes **Retry**; click it again after upload completes. The app does not poll in the background.
+
+After self-installation, the application verifies the final installed file, and attempts to roll back if verification fails. Restart zSoft Manager after a successful update.
+
+The Node.js and Python management pages are constructed only when first opened. AppImage scans reuse their existing GTK rows when the file list is unchanged. The Node view avoids deep-cloning the release schedule and global package inventory on each repaint. This is intended to reduce initial allocations and unnecessary work; actual memory usage depends on GTK4, distribution and workload.

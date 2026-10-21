@@ -391,7 +391,11 @@ if [ "$status" -ne 0 ] && [ "$status" -ne 1 ]; then
     echo "npm outdated failed (exit $status)" >&2
     exit "$status"
 fi
-printf '%s\n' "${result:-{}}"
+if [ -z "$result" ]; then
+    printf '{}\n'
+else
+    printf '%s\n' "$result"
+fi
 "#;
 const GLOBAL_UPDATE: &str = r#"
 set -eo pipefail
@@ -711,6 +715,53 @@ mod tests {
         assert!(!valid_global_package("--global"));
         assert!(!valid_global_package("a/b/c"));
     }
+
+    #[test]
+    fn npm_outdated_shell_output_is_valid_json() {
+        // Regression: Bash expansion "${result:-{}}" appended an extra '}' to
+        // both empty and non-empty results, breaking serde_json parsing.
+        let temp = std::env::temp_dir().join(format!(
+            "zsoft-npm-outdated-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&temp).unwrap();
+        std::fs::write(
+            temp.join("nvm.sh"),
+            r#"nvm() { return 0; }
+npm() {
+    if [ "$ZSOFT_TEST_NPM_CASE" = "updates" ]; then
+        printf '%s\n' '{"typescript":{"current":"5.9.0","latest":"6.0.0"}}'
+        return 1
+    fi
+    return 0
+}
+"#,
+        )
+        .unwrap();
+
+        for (case, expected) in [("updates", true), ("empty", false)] {
+            let output = Command::new("bash")
+                .arg("-c")
+                .arg(GLOBAL_OUTDATED)
+                .env("NVM_DIR", &temp)
+                .env("ZSOFT_TEST_NPM_CASE", case)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "npm stdout test {case} failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert_eq!(result.get("typescript").is_some(), expected);
+        }
+        std::fs::remove_dir_all(temp).unwrap();
+    }
+
     #[test]
     fn lifecycle_invalid_dates_fail_closed() {
         let schedule = ReleaseSchedule::parse(BUNDLED_SCHEDULE).unwrap();

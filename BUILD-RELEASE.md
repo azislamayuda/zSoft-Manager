@@ -70,3 +70,14 @@ Open the repository at https://github.com/azislamayuda/zSoft-Manager . Create a 
 
 - Bootstrap Studio: use its own license-aware updater; do not configure a guessed GitHub source.
 - GitHub Copilot desktop: `github/app`, release asset `GitHub-Copilot-linux-x64.AppImage` (user-specific AppImage directory/pattern must match).
+
+
+### v0.4.3 memory check (optional)
+
+Run the existing AppImage or release binary, then in another terminal:
+
+```bash
+ps -C zsoft-manager -o pid,rss,etime,args
+```
+
+`RSS` is in KiB. Compare an idle AppImage-only session with v0.4.2.1 under the same display/backend. Memory will rise after first opening the Node.js or Python page because their widgets are then allocated.

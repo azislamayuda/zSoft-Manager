@@ -2,6 +2,34 @@
 
 All notable changes to this project are recorded here. Format follows Keep a Changelog.
 
+## [0.4.3] - 2026-10-21
+
+### Fixed
+
+- Fixed Rust compiler error E0505 in GitHub release asset selection by cloning the small release tag string before it is used with borrowed asset data.
+- Fixed global npm outdated JSON parsing caused by an extra closing brace in the Bash command output.
+
+### Added
+
+- GitHub self-update readiness states to distinguish an incomplete release upload from an incorrectly configured asset pattern.
+- Manual Retry state on the existing self-update header icon; no background retry loop or daemon.
+- SHA256 readiness check: self-updates require a valid GitHub asset digest or a published, verified `.sha256` sidecar before installation is offered.
+- Post-install verification of installed AppImage size, ELF header and SHA256; if verification fails, attempt automatic rollback and report any restoration error.
+- Offline tests for incomplete releases, checksum parsing, mismatched filenames and post-install verification.
+
+### Optimized
+
+- Delay allocation of Node.js and Python GTK pages until first navigation; Node.js no longer spawns a local probe on AppImage-only startup.
+- Skip rebuilding the AppImage list when a rescan finds identical paths, keeping existing GTK widgets and callbacks.
+- Avoid cloning the full Node.js release schedule and package inventory on every Node page refresh; borrow the snapshot and clone only the requested install version.
+- Bound GitHub API responses to 2 MiB and checksum downloads to 4 KiB to avoid unlimited response buffering.
+- Select AppImage release assets with borrowed iterators instead of allocating an additional candidate list.
+- Preserve sequential, manual-only updates. No new background services or runtime dependencies.
+
+### Notes
+
+- This release does not guarantee a numerical RAM reduction on every system. Compare idle RSS and startup times before/after on the same Ubuntu environment.
+
 ## [0.4.2.1] - 2026-10-21
 
 ### Fixed
