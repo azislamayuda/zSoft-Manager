@@ -1,9 +1,9 @@
 [package]
 name = "zsoft-manager"
-version = "0.4.6"
+version = "0.4.7"
 edition = "2021"
 rust-version = "1.83"
-description = "Lightweight native AppImage and Flatpak software manager for Ubuntu"
+description = "Lightweight native AppImage, Flatpak and APT software manager for Ubuntu"
 license-file = "LICENSE"
 
 [dependencies]

@@ -217,6 +217,38 @@ fn controls(view: &Rc<RefCell<View>>) {
     v.select_all.set_sensitive(!v.busy && has_updates);
     v.clear.set_sensitive(!v.busy && selected);
 }
+// Keep technical metadata in a tooltip rather than adding more visible columns.
+// In particular, use the locally installed Flatpak commit to distinguish
+// the installed ref from the remote commit without cluttering each card.
+fn version_tooltip(item: &Item, installed: &str, latest: &str) -> String {
+    let local_commit = if item.active_commit.trim().is_empty() {
+        "Unknown"
+    } else {
+        item.active_commit.as_str()
+    };
+    let remote_commit = item
+        .remote_commit
+        .as_deref()
+        .filter(|commit| !commit.trim().is_empty())
+        .unwrap_or("Unavailable");
+    format!(
+        "Installed: {}\nLatest: {}\nOrigin: {} · {} · {}\nArchitecture: {}\nInstalled commit: {}\nRemote commit: {}",
+        installed, latest, item.origin, item.scope.label(), item.branch,
+        item.arch, local_commit, remote_commit
+    )
+}
+
+// No placeholder status per row before the user requests a remote check.
+// An error remains visible and its full detail is available as a tooltip.
+fn row_update_status(status: Status) -> Option<&'static str> {
+    match status {
+        Status::Available => Some("Update available"),
+        Status::UpToDate => Some("Up to date"),
+        Status::CheckFailed => Some("Check failed"),
+        Status::NotChecked => None,
+    }
+}
+
 fn render(view: &Rc<RefCell<View>>) {
     {
         let mut v = view.borrow_mut();
@@ -255,78 +287,74 @@ fn render(view: &Rc<RefCell<View>>) {
             ));
         }
         for item in &rows {
+            // A compact, borderless-column layout inside each separate card.
+            // Checkbox | Name + Application ID | Installed and latest versions.
             let card = gtk::Box::new(gtk::Orientation::Horizontal, 12);
-            card.add_css_class("node-card");
+            card.add_css_class("flatpak-row");
             let select = gtk::CheckButton::new();
             select.set_valign(gtk::Align::Center);
             select.set_sensitive(item.status == Status::Available);
             card.append(&select);
-            let content = gtk::Box::new(gtk::Orientation::Vertical, 4);
-            content.set_hexpand(true);
-            content.append(&label(&item.name, "file-title"));
-            content.append(&label(
-                &format!(
-                    "{} · {} · {} · {}",
-                    item.id,
-                    item.scope.label(),
-                    item.origin,
-                    item.branch
-                ),
-                "pathline",
-            ));
+
+            let grid = gtk::Grid::new();
+            grid.set_column_spacing(22);
+            grid.set_hexpand(true);
+            grid.set_column_homogeneous(false);
+
+            let identity = gtk::Box::new(gtk::Orientation::Vertical, 4);
+            identity.set_hexpand(true);
+            let name = label(&item.name, "file-title");
+            name.set_wrap(false);
+            name.set_ellipsize(gtk::pango::EllipsizeMode::End);
+            name.set_tooltip_text(Some(&item.name));
+            identity.append(&name);
+            let app_id = label(&item.id, "pathline");
+            app_id.set_wrap(false);
+            app_id.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
+            app_id.set_tooltip_text(Some(&format!(
+                "{} · {} · {} · {}",
+                item.id,
+                item.scope.label(),
+                item.origin,
+                item.branch
+            )));
+            identity.append(&app_id);
+            grid.attach(&identity, 0, 0, 1, 1);
+
+            let versions = gtk::Box::new(gtk::Orientation::Vertical, 5);
+            versions.set_valign(gtk::Align::Center);
             let installed = if item.installed.is_empty() {
                 "Unknown"
             } else {
                 &item.installed
             };
-            content.append(&label(
-                &format!(
-                    "Installed: {}  ·  Latest: {}",
-                    installed,
-                    item.latest.as_deref().unwrap_or(if v.checked {
-                        "Not available"
-                    } else {
-                        "Not checked"
-                    })
-                ),
-                "node-version",
-            ));
-            let abbrev = |value: &str| value.chars().take(12).collect::<String>();
-            let local_hash = if item.active_commit.is_empty() {
-                "Unknown".to_owned()
+            let latest = item.latest.as_deref().unwrap_or(if v.checked {
+                "Unavailable"
             } else {
-                abbrev(&item.active_commit)
-            };
-            let remote_hash = item
-                .remote_commit
-                .as_deref()
-                .map(abbrev)
-                .unwrap_or_else(|| "Not checked".to_owned());
-            content.append(&label(
-                &format!(
-                    "Arch: {} · Commit: {} → {}",
-                    item.arch, local_hash, remote_hash
-                ),
-                "pathline",
-            ));
-            let message = match item.status {
-                Status::Available => "Update available".to_owned(),
-                Status::UpToDate => "Up to date".to_owned(),
-                Status::NotChecked => "Click Check updates".to_owned(),
-                Status::CheckFailed => format!(
-                    "Check failed: {}",
-                    item.issue.as_deref().unwrap_or("Unknown")
-                ),
-            };
-            let text = label(&message, "node-status");
-            if item.status == Status::CheckFailed {
-                text.set_tooltip_text(item.issue.as_deref());
+                "Not checked"
+            });
+            let version_line = label(
+                &format!("Installed: {}  ·  Latest: {}", installed, latest),
+                "flatpak-version",
+            );
+            version_line.set_wrap(false);
+            version_line.set_ellipsize(gtk::pango::EllipsizeMode::End);
+            version_line.set_tooltip_text(Some(&version_tooltip(item, installed, latest)));
+            versions.append(&version_line);
+            if let Some(message) = row_update_status(item.status) {
+                let detail = label(message, "flatpak-status");
+                detail.set_wrap(false);
+                if item.status == Status::CheckFailed {
+                    detail.set_tooltip_text(item.issue.as_deref());
+                }
+                versions.append(&detail);
             }
-            content.append(&text);
-            card.append(&content);
+            grid.attach(&versions, 1, 0, 1, 1);
+
+            card.append(&grid);
             v.list.append(&card);
             if item.status == Status::Available {
-                v.selections.push((item.key(), select.clone()));
+                v.selections.push((item.key(), select));
             }
         }
     }
@@ -542,6 +570,90 @@ mod tests {
         assert!(source.contains("header.append(&tabs);"));
         assert!(source.contains("heading.set_hexpand(true);"));
         assert!(source.contains("tabs.set_halign(gtk::Align::End);"));
+    }
+    #[test]
+    fn flatpak_rows_have_aligned_columns_and_no_placeholder_status() {
+        let source = include_str!("flatpak_ui.rs");
+        let production = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(production.contains("grid.attach(&identity, 0, 0, 1, 1);"));
+        assert!(!production.contains("grid.attach(&arch,"));
+        assert!(production.contains("grid.attach(&versions, 1, 0, 1, 1);"));
+        assert!(production.contains("card.add_css_class(\"flatpak-row\");"));
+        // Other page-level help can still say Check updates; only rows must omit it.
+        let row_render = production
+            .split("fn render(")
+            .nth(1)
+            .unwrap_or("")
+            .split("fn poll(")
+            .next()
+            .unwrap_or("");
+        assert!(!row_render.contains("Click Check updates"));
+        assert!(row_render.contains("gtk::CheckButton::new()"));
+    }
+    #[test]
+    fn flatpak_commit_and_architecture_are_available_in_tooltips_only() {
+        let item = super::Item {
+            name: "Bitwarden".into(),
+            id: "com.bitwarden.desktop".into(),
+            installed: "2026.10.0".into(),
+            latest: Some("2026.10.1".into()),
+            branch: "stable".into(),
+            origin: "flathub".into(),
+            arch: "x86_64".into(),
+            active_commit: "local123abc".into(),
+            remote_commit: Some("remote456def".into()),
+            scope: super::flatpak::Scope::System,
+            kind: super::Kind::App,
+            status: super::Status::Available,
+            issue: None,
+        };
+        let tooltip = super::version_tooltip(&item, "2026.10.0", "2026.10.1");
+        assert!(tooltip.contains("Installed commit: local123abc"));
+        assert!(tooltip.contains("Remote commit: remote456def"));
+        assert!(tooltip.contains("Architecture: x86_64"));
+        assert!(tooltip.contains("Origin: flathub · System · stable"));
+        let source = include_str!("flatpak_ui.rs");
+        let render = source
+            .split("fn render(")
+            .nth(1)
+            .unwrap_or("")
+            .split("fn poll(")
+            .next()
+            .unwrap_or("");
+        assert!(!render.contains("flatpak-arch"));
+        assert!(!render.contains("grid.attach(&arch,"));
+    }
+    #[test]
+    fn missing_commit_keeps_tooltip_readable() {
+        let item = super::Item {
+            name: "Demo".into(),
+            id: "org.example.Demo".into(),
+            installed: "1.0".into(),
+            latest: None,
+            branch: "stable".into(),
+            origin: "flathub".into(),
+            arch: "x86_64".into(),
+            active_commit: String::new(),
+            remote_commit: None,
+            scope: super::flatpak::Scope::User,
+            kind: super::Kind::App,
+            status: super::Status::NotChecked,
+            issue: None,
+        };
+        let tooltip = super::version_tooltip(&item, "1.0", "Not checked");
+        assert!(tooltip.contains("Installed commit: Unknown"));
+        assert!(tooltip.contains("Remote commit: Unavailable"));
+    }
+    #[test]
+    fn flatpak_status_requires_actual_check_result() {
+        use super::*;
+        assert_eq!(row_update_status(Status::NotChecked), None);
+        assert_eq!(row_update_status(Status::UpToDate), Some("Up to date"));
+        assert_eq!(
+            row_update_status(Status::Available),
+            Some("Update available")
+        );
+        assert_eq!(row_update_status(Status::CheckFailed), Some("Check failed"));
     }
     #[test]
     fn new_flatpak_page_has_separate_runtime_and_app_views() {

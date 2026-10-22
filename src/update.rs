@@ -866,7 +866,7 @@ fn fetch_github_json<T: DeserializeOwned>(api: &str, max_bytes: &str) -> Result<
             "--header",
             "Accept: application/vnd.github+json",
             "--header",
-            "User-Agent: zSoft-Manager/0.4.6",
+            "User-Agent: zSoft-Manager/0.4.7",
             "--write-out",
             "\\n__ZSOFT_GITHUB_HTTP__=%{http_code}\\n",
         ])

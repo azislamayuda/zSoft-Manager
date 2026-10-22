@@ -1,45 +1,36 @@
-# zSoft Manager v0.4.6 — Development, Testing & Release
+# zSoft Manager v0.4.7 — Development, Testing & Release
 
-This development snapshot adds Flatpak management on top of the verified v0.4.4 AppImage/Node/Python code. **Do not publish until Rust tests and GUI smoke tests pass on Ubuntu.**
+New in v0.4.7: dedicated APT Manager (after Flatpak), read-only package previews, privileged operations through pkexec/Polkit, protected Autoremove, progress log, check-summary toast, and reboot flag.
 
-## Apply patch to existing GitHub Desktop clone
+## Apply patch (existing v0.4.6 checkout)
 
 ```bash
 cd "$HOME/ZDATA/ME/GITHUB/zSoft-Manager"
-unzip -o ~/Downloads/zSoft-Manager-v0.4.6-PATCH.zip -d .
+unzip -o ~/Downloads/zSoft-Manager-v0.4.7-PATCH.zip -d .
+```
+
+The patch is based on v0.4.6 with the GitHub HTTP fix integrated. Back up any newer changes to overlapping source files before replacing them. Do not modify `.git`.
+
+## Compile and audit
+
+```bash
 cargo fmt
-bash scripts/audit-v046.sh
+bash scripts/audit-v047.sh
 cargo run --release
 ```
 
-Keep `.git` and your user configuration untouched. The patch contains only source/docs/scripts, no binaries.
+See `APT-v0.4.7-TEST-NOTES.md` for read-only testing, confirmations, authorization, error handling and safety limits. Do **not** start by testing Autoremove on real packages.
 
-## Flatpak test checklist
-
-See `FLATPAK-v0.4.5-TEST-NOTES.md`. Confirm user+system installation listings, app/runtime tabs, remote comparison, and one selected update before testing Update all. Never run the GUI with `sudo`.
-
-```bash
-flatpak --version
-flatpak list --app --columns=name,application,version,branch,origin,installation,active
-flatpak remote-ls --app --updates
-```
-
-## Final AppImage packaging (only after test success)
+## Package only after GUI/Polkit tests pass
 
 ```bash
 bash scripts/test-and-build.sh
+ls -lh dist/zSoft-Manager-v0.4.7-x86_64.AppImage*
 cd dist
-sha256sum -c zSoft-Manager-v0.4.6-x86_64.AppImage.sha256
-./zSoft-Manager-v0.4.6-x86_64.AppImage
+sha256sum -c zSoft-Manager-v0.4.7-x86_64.AppImage.sha256
+./zSoft-Manager-v0.4.7-x86_64.AppImage
 ```
 
-Expected release assets:
+Upload the AppImage and matching `.sha256` sidecar to the GitHub release only after checking the packaged app on Ubuntu. Use GitHub Desktop for Commit/Push.
 
-- `dist/zSoft-Manager-v0.4.6-x86_64.AppImage`
-- `dist/zSoft-Manager-v0.4.6-x86_64.AppImage.sha256`
-
-Commit/push through GitHub Desktop. Publish GitHub tag `v0.4.6` only after the packaged AppImage works.
-
-## v0.4.6 UI checks before packaging
-
-Click **Check updates** separately in the AppImage, Flatpak, Node.js and Python pages. Confirm the toast counts agree with the visible result lists; check a zero-update case, and a controlled failure case if possible. Check both Flatpak tabs and verify Applications / Runtimes stay next to the title. Update execution still requires explicit user input.
+Note: pkexec is external OS functionality; AppImage packaging does not install polkit, policy rules, or admin helpers. A functioning system Polkit authentication agent is required for privileged APT operations.

@@ -2,7 +2,7 @@
 
 **zSoft Manager** is a lightweight, native Rust + GTK4 application manager for Ubuntu and related Linux distributions, created by [@azislamayuda](https://github.com/azislamayuda).
 
-**Current development version: v0.4.6** — AppImage, Flatpak, NVM-managed Node.js, and Python virtual environment updates. Network checks run only on request.
+**Current development version: v0.4.7** — AppImage, Flatpak, NVM-managed Node.js, and Python virtual environment updates. Network checks run only on request.
 
 > The app manages **AppImage**, **Flatpak** (applications and runtimes), **NVM-managed Node.js**, and **Python virtual environment** packages. `.deb` and Snap package management are not implemented.
 
@@ -98,7 +98,7 @@ bash scripts/build-appimage.sh
 
 On x86_64 Ubuntu, the script downloads an official linuxdeploy binary if not already cached, assembles GTK4-linked components into an AppDir and writes the AppImage + SHA256 file to `dist/`. Runtime portability must still be smoke-tested on the target Ubuntu versions. It is also possible to create a release via the GitHub Actions workflow by pushing a tag, after building and testing locally.
 
-Use GitHub Desktop for **Commit to main** and **Push origin**. After tests succeed, create the tag `v0.4.6` from GitHub's new-release page, rather than using Git CLI.
+Use GitHub Desktop for **Commit to main** and **Push origin**. After tests succeed, create the tag `v0.4.7` from GitHub's new-release page, rather than using Git CLI.
 
 The GitHub Actions `release-appimage.yml` job will test, build, package, and upload the AppImage to GitHub Releases. A Release is required before the self-updater works; an empty repository is not a Release.
 
@@ -108,7 +108,7 @@ The development repository is expected at `/home/lamayuda/ZDATA/ME/GITHUB/zSoft-
 
 ## Previous zAppImage Manager migration
 
-If you already cloned `zSoft-Manager` via GitHub Desktop, **do not run the old migration script again**. Extract the v0.4.6 PATCH into your existing clone. Do not overwrite `.git`. Local Git operations are performed with GitHub Desktop, not the command line.
+If you already cloned `zSoft-Manager` via GitHub Desktop, **do not run the old migration script again**. Extract the v0.4.7 PATCH into your existing clone. Do not overwrite `.git`. Local Git operations are performed with GitHub Desktop, not the command line.
 
 Source configuration reads existing `~/.config/zappimage-manager/sources.json` and state `~/.local/state/zappimage-manager/installed.json` as a fallback, and saves future changes under `zsoft-manager`. Old files remain untouched and existing rollback backups are preserved.
 
@@ -186,3 +186,16 @@ The **Flatpak** header icon is located immediately after AppImage. It opens a de
 - v0.4.5 handles the standard `--user` and `--system` installations. Named additional system installations are not yet managed by this page.
 
 For manual diagnostics: `flatpak list --app`, `flatpak list --runtime`, and `flatpak remote-ls --updates`.
+
+## Ubuntu APT Manager (v0.4.7)
+
+APT Manager appears immediately after Flatpak in the top navigation. Use Check updates for a read-only upgrade/autoremove simulation; Refresh lists requests Polkit authorization to run apt-get update. Upgrade packages and Autoremove require preview and confirmation before a second simulation and authorized operation. Autoclean also requires confirmation. The UI does not run as root. Protected system package removal, implicit full-upgrade, forced lock removal, and transactions above 25 changed packages are blocked in this first version. See `APT-v0.4.7-TEST-NOTES.md` for details.
+
+
+## Dashboard and combined About page (v0.4.7)
+
+Dashboard is now the first page and first navigation icon. Its five cards summarize **installed local software** separately: managed AppImage files, Flatpak applications (with runtime count), installed Ubuntu APT packages, NVM Node.js versions and global npm packages, and selected Python venv top-level packages. Each card shows only its **count and a concise summary**, without per-card buttons or individual application names. The layout uses three compact columns in a normal window and four columns when maximized, with rows retaining their natural height. **Refresh overview** reruns read-only local inventory workers. No GitHub/Flathub/APT repository updates, upgrades, or administrative prompts are triggered by Dashboard.
+
+APT package totals are system packages, **not the number of graphical applications**. Unavailable CLI or invalid Python environments are shown as unavailable, never silently reported as zero. Dashboard counts are snapshots until refreshed; checks for available updates still belong in the individual manager pages.
+
+About and Changelog share one navigation page, with separate scrollable cards. The obsolete Back to applications button and Network detail row were removed. See `DASHBOARD-REFINE-v0.4.7-TEST-NOTES.md` for the current GUI verification steps.

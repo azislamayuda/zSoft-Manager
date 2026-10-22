@@ -1,6 +1,7 @@
 use crate::{
+    apt_ui,
     config::{self, Source, SourceProvider},
-    flatpak_ui, info, naming, node_ui, python_ui, scan, self_update,
+    dashboard_ui, flatpak_ui, info, naming, node_ui, python_ui, scan, self_update,
     update::{self, CheckState, ReleaseInfo},
 };
 use gtk::{gdk, glib, prelude::*};
@@ -52,27 +53,29 @@ enum Event {
     Done { refresh_list: bool },
 }
 
-// A single GtkStack keeps navigation inside the main window, without dialogs
-// for About or Changelog and without any extra runtime or background worker.
+// GtkStack keeps navigation inside the main window. Dashboard inventory
+// uses short-lived local workers; About and Changelog are offline.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Page {
+    Dashboard,
     Applications,
     Flatpak,
+    Apt,
     Node,
     Python,
     About,
-    Changelog,
 }
 
 impl Page {
     fn id(self) -> &'static str {
         match self {
+            Self::Dashboard => "dashboard",
             Self::Applications => "applications",
             Self::Flatpak => "flatpak",
+            Self::Apt => "apt",
             Self::Node => "node",
             Self::Python => "python",
             Self::About => "about",
-            Self::Changelog => "changelog",
         }
     }
 }
@@ -82,13 +85,14 @@ const MAIN_ACTION_LABELS: [&str; 3] = ["Rescan", "Check updates", "Update all"];
 // All navigation assets are GTK symbolic icons. Using theme icons instead of
 // GtkImage::from_paintable keeps Node and Python at the same pixel size as the
 // About and Changelog icons, regardless of the original PNG dimensions.
-const NAV_SYMBOLIC_ICONS: [&str; 7] = [
+const NAV_SYMBOLIC_ICONS: [&str; 8] = [
+    "view-grid-symbolic",                 // Dashboard
     "application-x-executable-symbolic",  // AppImage
-    "package-x-generic-symbolic",         // Flatpak
+    "application-x-addon-symbolic",       // Flatpak: add-on / puzzle
+    "package-x-generic-symbolic",         // APT: installed software packages
     "utilities-terminal-symbolic",        // Node.js
     "applications-development-symbolic",  // Python
-    "help-about-symbolic",                // About
-    "document-open-recent-symbolic",      // Changelog
+    "help-about-symbolic",                // About + Changelog
     "software-update-available-symbolic", // Self-update
 ];
 const NAV_ICON_SIZE: i32 = 20;
@@ -195,23 +199,25 @@ fn icon_only_button(icon_name: &str, tooltip: &str) -> gtk::Button {
 #[derive(Clone)]
 struct Navigation {
     stack: gtk::Stack,
+    dashboard: gtk::Button,
     appimage: gtk::Button,
     flatpak: gtk::Button,
+    apt: gtk::Button,
     node: gtk::Button,
     python: gtk::Button,
     about: gtk::Button,
-    changelog: gtk::Button,
 }
 
 fn navigate(nav: &Navigation, page: Page) {
     nav.stack.set_visible_child_name(page.id());
     for (button, destination) in [
+        (&nav.dashboard, Page::Dashboard),
         (&nav.appimage, Page::Applications),
         (&nav.flatpak, Page::Flatpak),
+        (&nav.apt, Page::Apt),
         (&nav.node, Page::Node),
         (&nav.python, Page::Python),
         (&nav.about, Page::About),
-        (&nav.changelog, Page::Changelog),
     ] {
         if page == destination {
             button.add_css_class("nav-active");
@@ -308,19 +314,24 @@ fn build_ui(app: &gtk::Application) {
     let navigation = gtk::Box::new(gtk::Orientation::Horizontal, 8);
     navigation.set_valign(gtk::Align::Center);
     navigation.add_css_class("navigation");
-    let appimage_nav = icon_only_button(NAV_SYMBOLIC_ICONS[0], "AppImage Manager");
-    let flatpak_nav = icon_only_button(NAV_SYMBOLIC_ICONS[1], "Flatpak Manager");
-    let node_nav = icon_only_button(NAV_SYMBOLIC_ICONS[2], "Node.js / npm / NVM");
-    let python_nav = icon_only_button(NAV_SYMBOLIC_ICONS[3], "Python environments / pip");
-    let about_nav = icon_only_button(NAV_SYMBOLIC_ICONS[4], "About");
-    let changelog_nav = icon_only_button(NAV_SYMBOLIC_ICONS[5], "Changelog");
+    let dashboard_nav = icon_only_button(
+        NAV_SYMBOLIC_ICONS[0],
+        "Dashboard / Installed software overview",
+    );
+    let appimage_nav = icon_only_button(NAV_SYMBOLIC_ICONS[1], "AppImage Manager");
+    let flatpak_nav = icon_only_button(NAV_SYMBOLIC_ICONS[2], "Flatpak Manager");
+    let apt_nav = icon_only_button(NAV_SYMBOLIC_ICONS[3], "APT Manager / Ubuntu Maintenance");
+    let node_nav = icon_only_button(NAV_SYMBOLIC_ICONS[4], "Node.js / npm / NVM");
+    let python_nav = icon_only_button(NAV_SYMBOLIC_ICONS[5], "Python environments / pip");
+    let about_nav = icon_only_button(NAV_SYMBOLIC_ICONS[6], "About & Changelog");
+    navigation.append(&dashboard_nav);
     navigation.append(&appimage_nav);
     navigation.append(&flatpak_nav);
+    navigation.append(&apt_nav);
     navigation.append(&node_nav);
     navigation.append(&python_nav);
     navigation.append(&about_nav);
-    navigation.append(&changelog_nav);
-    let self_button = icon_only_button(NAV_SYMBOLIC_ICONS[6], "Check zSoft Manager updates");
+    let self_button = icon_only_button(NAV_SYMBOLIC_ICONS[7], "Check zSoft Manager updates");
     navigation.append(&self_button);
     hero.append(&navigation);
     root_panel.append(&hero);
@@ -331,11 +342,25 @@ fn build_ui(app: &gtk::Application) {
     stack.set_vexpand(true);
     stack.set_hexpand(true);
 
+    // The landing page provides local read-only inventories in lightweight cards.
+    // Workers run only for the dashboard, not for other page navigation.
+    let dashboard_page = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    stack.add_named(&dashboard_page, Some(Page::Dashboard.id()));
+
     // APPLICATIONS PAGE: existing AppImage management controls stay intact.
     let apps_page = gtk::Box::new(gtk::Orientation::Vertical, 14);
     apps_page.add_css_class("page");
+    let apps_header = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+    apps_header.add_css_class("page-header");
+    let apps_heading = gtk::Label::new(Some("AppImage Manager"));
+    apps_heading.add_css_class("page-heading");
+    apps_heading.set_xalign(0.0);
+    apps_heading.set_hexpand(true);
+    apps_header.append(&apps_heading);
     let actions = gtk::Box::new(gtk::Orientation::Horizontal, 10);
     actions.add_css_class("action-bar");
+    actions.set_halign(gtk::Align::End);
+    actions.set_valign(gtk::Align::Center);
     let refresh = button_with_icon(
         MAIN_ACTION_LABELS[0],
         "view-refresh-symbolic",
@@ -354,7 +379,8 @@ fn build_ui(app: &gtk::Application) {
     actions.append(&refresh);
     actions.append(&check);
     actions.append(&update_all);
-    apps_page.append(&actions);
+    apps_header.append(&actions);
+    apps_page.append(&apps_header);
 
     let count = gtk::Label::new(None);
     count.set_xalign(0.0);
@@ -375,6 +401,9 @@ fn build_ui(app: &gtk::Application) {
     let flatpak_page = gtk::Box::new(gtk::Orientation::Vertical, 0);
     stack.add_named(&flatpak_page, Some(Page::Flatpak.id()));
     let flatpak_loaded = Rc::new(Cell::new(false));
+    let apt_page = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    stack.add_named(&apt_page, Some(Page::Apt.id()));
+    let apt_loaded = Rc::new(Cell::new(false));
 
     // Build heavy toolchain pages only when opened. This avoids starting Node
     // subprocesses at startup and reduces GTK widget allocations on AppImage-only sessions.
@@ -385,19 +414,13 @@ fn build_ui(app: &gtk::Application) {
     let node_loaded = Rc::new(Cell::new(false));
     let python_loaded = Rc::new(Cell::new(false));
 
-    // ABOUT PAGE: full in-window page, not a dialog or popover.
-    let about_page = gtk::Box::new(gtk::Orientation::Vertical, 16);
+    // Single About page: separate offline cards in one scrollable document.
+    let about_page = gtk::Box::new(gtk::Orientation::Vertical, 0);
     about_page.add_css_class("page");
-    let about_back = button_with_icon(
-        "Back to applications",
-        "go-previous-symbolic",
-        "back-button",
-    );
-    about_back.set_halign(gtk::Align::Start);
-    about_page.append(&about_back);
     let about_scroll = gtk::ScrolledWindow::new();
     about_scroll.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Automatic);
     about_scroll.set_vexpand(true);
+    let about_sections = gtk::Box::new(gtk::Orientation::Vertical, 14);
     let about_content = gtk::Box::new(gtk::Orientation::Vertical, 15);
     about_content.add_css_class("content-card");
     let about_title = gtk::Label::new(Some("About"));
@@ -405,7 +428,7 @@ fn build_ui(app: &gtk::Application) {
     about_title.set_xalign(0.0);
     about_content.append(&about_title);
     let about_description = gtk::Label::new(Some(
-        "A lightweight native software manager for Ubuntu. Manage AppImages, Flatpak applications and runtimes, Node.js, npm, and Python environments."
+        "A lightweight native software manager for Ubuntu. Manage AppImages, Flatpak applications and runtimes, Ubuntu APT packages, Node.js, npm, and Python environments."
     ));
     about_description.set_wrap(true);
     about_description.set_xalign(0.0);
@@ -421,9 +444,8 @@ fn build_ui(app: &gtk::Application) {
     detail_row(
         &details,
         "Update source",
-        "GitHub Releases · KDE Downloads · Flatpak remotes · nvm-sh · Node.js · npm",
+        "GitHub Releases · KDE Downloads · Flatpak remotes · Ubuntu APT · nvm-sh · Node.js · npm",
     );
-    detail_row(&details, "Network", "On demand only · No background daemon");
     about_content.append(&details);
     let project_link = button_with_icon(
         "Visit GitHub @azislamayuda",
@@ -432,20 +454,10 @@ fn build_ui(app: &gtk::Application) {
     );
     project_link.set_halign(gtk::Align::Start);
     about_content.append(&project_link);
-    about_scroll.set_child(Some(&about_content));
-    about_page.append(&about_scroll);
-    stack.add_named(&about_page, Some(Page::About.id()));
+    about_sections.append(&about_content);
 
-    // CHANGELOG PAGE: readable offline from the embedded CHANGELOG.md.
-    let changelog_page = gtk::Box::new(gtk::Orientation::Vertical, 16);
-    changelog_page.add_css_class("page");
-    let changelog_back = button_with_icon(
-        "Back to applications",
-        "go-previous-symbolic",
-        "back-button",
-    );
-    changelog_back.set_halign(gtk::Align::Start);
-    changelog_page.append(&changelog_back);
+    let changelog_card = gtk::Box::new(gtk::Orientation::Vertical, 12);
+    changelog_card.add_css_class("content-card");
     let changelog_header = gtk::Box::new(gtk::Orientation::Horizontal, 12);
     changelog_header.add_css_class("page-header");
     let changelog_heading = gtk::Label::new(Some("Changelog"));
@@ -456,34 +468,41 @@ fn build_ui(app: &gtk::Application) {
     let current_version = gtk::Label::new(Some(&info::version_label()));
     current_version.add_css_class("version-chip");
     changelog_header.append(&current_version);
-    changelog_page.append(&changelog_header);
+    changelog_card.append(&changelog_header);
     let changelog_scroll = gtk::ScrolledWindow::new();
     changelog_scroll.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Automatic);
-    changelog_scroll.set_vexpand(true);
+    changelog_scroll.set_height_request(380);
     changelog_scroll.add_css_class("changelog-scroll");
     let changelog_view = gtk::TextView::new();
     changelog_view.set_editable(false);
     changelog_view.set_cursor_visible(false);
     changelog_view.set_wrap_mode(gtk::WrapMode::WordChar);
-    changelog_view.set_top_margin(23);
-    changelog_view.set_bottom_margin(23);
-    changelog_view.set_left_margin(25);
-    changelog_view.set_right_margin(25);
+    changelog_view.set_top_margin(16);
+    changelog_view.set_bottom_margin(16);
+    changelog_view.set_left_margin(16);
+    changelog_view.set_right_margin(16);
     changelog_view.add_css_class("changelog-text");
     changelog_view.buffer().set_text(info::CHANGELOG);
     changelog_scroll.set_child(Some(&changelog_view));
-    changelog_page.append(&changelog_scroll);
-    stack.add_named(&changelog_page, Some(Page::Changelog.id()));
+    changelog_card.append(&changelog_scroll);
+    about_sections.append(&changelog_card);
+    about_scroll.set_child(Some(&about_sections));
+    about_page.append(&about_scroll);
+    stack.add_named(&about_page, Some(Page::About.id()));
     let nav = Navigation {
         stack: stack.clone(),
+        dashboard: dashboard_nav.clone(),
         appimage: appimage_nav.clone(),
         flatpak: flatpak_nav.clone(),
+        apt: apt_nav.clone(),
         node: node_nav.clone(),
         python: python_nav.clone(),
         about: about_nav.clone(),
-        changelog: changelog_nav.clone(),
     };
-    navigate(&nav, Page::Applications);
+    // Dashboard is read-only: cards show quantities and summaries, without
+    // buttons or per-application names. Navigation stays in the header.
+    dashboard_page.append(&dashboard_ui::build(&window));
+    navigate(&nav, Page::Dashboard);
     root_panel.append(&stack);
 
     // Fixed footer, visible on every page.
@@ -559,12 +578,13 @@ fn build_ui(app: &gtk::Application) {
     let toast_sequence = Rc::new(Cell::new(0_u64));
 
     for (page, button) in [
+        (Page::Dashboard, dashboard_nav.clone()),
         (Page::Applications, appimage_nav.clone()),
         (Page::Flatpak, flatpak_nav.clone()),
+        (Page::Apt, apt_nav.clone()),
         (Page::Node, node_nav.clone()),
         (Page::Python, python_nav.clone()),
         (Page::About, about_nav.clone()),
-        (Page::Changelog, changelog_nav.clone()),
     ] {
         let nav = nav.clone();
         let flatpak_page = flatpak_page.clone();
@@ -572,6 +592,8 @@ fn build_ui(app: &gtk::Application) {
         let flatpak_label = toast_label.clone();
         let flatpak_sequence = toast_sequence.clone();
         let flatpak_loaded = flatpak_loaded.clone();
+        let apt_loaded = apt_loaded.clone();
+        let apt_page = apt_page.clone();
         let node_page = node_page.clone();
         let python_page = python_page.clone();
         let node_loaded = node_loaded.clone();
@@ -579,6 +601,13 @@ fn build_ui(app: &gtk::Application) {
         button.connect_clicked(move |_| {
             if page == Page::Flatpak && !flatpak_loaded.replace(true) {
                 flatpak_page.append(&flatpak_ui::build(page_notice(
+                    &flatpak_toast,
+                    &flatpak_label,
+                    &flatpak_sequence,
+                )));
+            }
+            if page == Page::Apt && !apt_loaded.replace(true) {
+                apt_page.append(&apt_ui::build(page_notice(
                     &flatpak_toast,
                     &flatpak_label,
                     &flatpak_sequence,
@@ -600,10 +629,6 @@ fn build_ui(app: &gtk::Application) {
             }
             navigate(&nav, page);
         });
-    }
-    for back in [about_back, changelog_back] {
-        let nav = nav.clone();
-        back.connect_clicked(move |_| navigate(&nav, Page::Applications));
     }
     {
         let status = footer.clone();
@@ -1990,29 +2015,59 @@ mod ui_tests {
     #[test]
     fn stack_pages_have_unique_names() {
         let ids = [
+            Page::Dashboard.id(),
             Page::Applications.id(),
             Page::Flatpak.id(),
+            Page::Apt.id(),
             Page::Node.id(),
             Page::Python.id(),
             Page::About.id(),
-            Page::Changelog.id(),
         ];
         assert_eq!(
             ids,
             [
+                "dashboard",
                 "applications",
                 "flatpak",
+                "apt",
                 "node",
                 "python",
-                "about",
-                "changelog"
+                "about"
             ]
         );
-        assert_ne!(ids[0], ids[1]);
-        assert_ne!(ids[1], ids[2]);
-        assert_ne!(ids[2], ids[3]);
-        assert_ne!(ids[3], ids[4]);
-        assert_ne!(ids[4], ids[5]);
+        let mut unique = ids.to_vec();
+        unique.sort_unstable();
+        unique.dedup();
+        assert_eq!(unique.len(), ids.len());
+    }
+
+    #[test]
+    fn combined_about_page_is_offline_and_without_legacy_controls() {
+        let source = include_str!("ui.rs");
+        let app_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(!app_source.contains("Back to applications"));
+        assert!(!app_source.contains("detail_row(&details, \"Network\""));
+        assert!(!app_source.contains("Page::Changelog"));
+        assert!(app_source.contains("about_sections.append(&changelog_card);"));
+    }
+
+    #[test]
+    fn appimage_primary_actions_share_the_subheader() {
+        let full_source = include_str!("ui.rs");
+        let production = full_source
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap_or(full_source);
+        assert!(production.contains("apps_header.append(&actions);"));
+        assert!(production.contains("apps_page.append(&apps_header);"));
+        assert!(production.contains("AppImage Manager"));
+        assert!(!production.contains("apps_page.append(&actions);"));
+    }
+
+    #[test]
+    fn flatpak_and_apt_navigation_have_distinct_theme_icons() {
+        assert_eq!(NAV_SYMBOLIC_ICONS[2], "application-x-addon-symbolic");
+        assert_eq!(NAV_SYMBOLIC_ICONS[3], "package-x-generic-symbolic");
     }
 
     #[test]
@@ -2107,7 +2162,7 @@ mod navigation_tests {
 
     #[test]
     fn all_header_navigation_icons_use_symbolic_gtk_icons() {
-        assert_eq!(NAV_SYMBOLIC_ICONS.len(), 7);
+        assert_eq!(NAV_SYMBOLIC_ICONS.len(), 8);
         assert!(NAV_SYMBOLIC_ICONS
             .iter()
             .all(|name| name.ends_with("-symbolic")));

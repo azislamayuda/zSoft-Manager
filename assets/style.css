@@ -231,6 +231,17 @@ headerbar.compact-titlebar windowcontrols button {
 .node-latest { color: #5084ae; font-size: 12px; }
 .node-status { color: #617d99; font-size: 12px; padding: 7px 2px; }
 
+/* Flatpak: aligned, divider-free columns inside each compact application card. */
+.flatpak-row {
+  background: #fff;
+  border: 1px solid #e1eaf4;
+  border-radius: 12px;
+  padding: 12px 16px;
+}
+.flatpak-arch { color: #64819d; font-size: 12px; font-weight: 600; }
+.flatpak-version { color: #3b6387; font-size: 12px; font-weight: 600; }
+.flatpak-status { color: #5781aa; font-size: 11px; }
+
 /* v0.4.1: Python venv management, same compact soft-blue flat treatment. */
 .python-config {
   background: #f0f7ff;
@@ -273,3 +284,17 @@ headerbar.compact-titlebar windowcontrols button {
 }
 .node-minicard button { min-height: 34px; }
 .node-empty { padding: 10px 14px; color: #6a819a; }
+
+/* v0.4.7: local-only landing Dashboard; light, flat summary cards. */
+.dashboard-card {
+  background: #ffffff;
+  border: 1px solid #dee8f4;
+  border-radius: 13px;
+  padding: 12px 15px;
+  margin: 2px;
+  min-height: 92px;
+}
+.dashboard-card-title { color: #254f80; font-size: 15px; font-weight: 700; }
+.dashboard-icon { color: #5485b7; }
+.dashboard-count { color: #245d97; font-size: 30px; font-weight: 750; }
+.dashboard-description { color: #6684a2; font-size: 12px; }

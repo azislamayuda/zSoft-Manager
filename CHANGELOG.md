@@ -2,6 +2,58 @@
 
 All notable changes to this project are recorded here. Format follows Keep a Changelog.
 
+## [0.4.7] - 2026-10-22 (Development)
+
+### Flatpak row simplification and compiler warning fix (pre-release)
+- Removed the visible architecture column from Flatpak application and runtime cards; cards now show only the name/Application ID and installed/latest version (plus status after checking).
+- Kept the update checkbox and per-ref update behavior unchanged.
+- Preserved architecture, installation scope, branch, origin and installed/remote commit IDs in the version tooltip.
+- Read the previously unused `active_commit` field in the tooltip, resolving the Rust dead-code warning without discarding commit data.
+- Added regression tests for compact rows and tooltip metadata, including absent commit IDs.
+
+
+### Flatpak card rows and APT icon polish (pre-release)
+- Changed the APT navigation and Dashboard icons from a settings gear to a software package symbol; Flatpak retains its distinct add-on icon.
+- Reformatted Flatpak Applications and Runtimes into aligned, borderless columns within each card: application name and ID, architecture, installed and latest version.
+- Kept the per-item update checkbox and update actions. Removed repetitive `Click Check updates` text from rows before a remote check.
+- Display status only after an update check, and retain full check errors as tooltips. No Flatpak update logic or APT privilege policy changed.
+
+
+### Compact responsive Dashboard cards (pre-release)
+- Fixed Dashboard cards stretching vertically to fill unused scrolling viewport space; rows now use their natural content height.
+- Adjusted Dashboard layout to **three columns in normal window mode** and **four columns when maximized**, updating immediately when the maximize state changes.
+- Reduced dashboard card padding and minimum height while retaining the count and summary-only design. AppImage, Flatpak, APT, Node.js, Python and About behavior is unchanged.
+
+### Dashboard and AppImage layout refinements (pre-release)
+- Dashboard cards now display only the installed count and concise category summary; removed application-name lists and per-card navigation buttons.
+- Dashboard uses three columns in the normal window and four columns when maximized, following GTK window maximize events without polling.
+- Added **AppImage Manager** subheader with Rescan, Check updates and Update all aligned to the right on the same row.
+- Distinguished Flatpak (add-on/puzzle) and APT (system/gear) navigation icons using GTK theme symbolic assets.
+- Kept all changes under v0.4.7. Read-only dashboard inventory and APT authorization safeguards are unchanged.
+
+### Dashboard and About layout (pre-release)
+- Added **Dashboard** as the first page and first navigation icon, summarizing installed AppImages, Flatpak applications/runtimes, Ubuntu APT packages, NVM Node.js versions and global npm packages, and Python top-level packages.
+- The initial dashboard design included sample names/versions and manager links (subsequently removed in the compact card refinement above). A **Refresh overview** action reloads the local inventory without requesting updates or privileges.
+- Dashboard work runs in short-lived worker threads; failures show as unavailable rather than zero installed. APT package count is separate from GUI application counts, and no remote update status is inferred from local versions.
+- Merged **Changelog** under **About** as a separate offline card and removed the standalone Changelog navigation icon.
+- Removed **Back to applications** and the About-only **Network** detail row.
+- Kept the version at 0.4.7 and preserved all APT safety guards and existing managers.
+
+
+### Added
+- Aligned the APT Manager primary actions (Check updates, Refresh lists, Upgrade packages) to the right of the page heading, matching the Flatpak header layout. The APT safety and authorization flows are unchanged.
+- Dedicated lazy-loaded APT Manager after Flatpak in top navigation.
+- Read-only preview of APT upgrades, candidate package versions, Autoremove, held packages and reboot requirement.
+- Explicit Polkit authentication for Refresh lists, Upgrade packages, Autoremove and Autoclean.
+- Live operation log, status and update-summary toast.
+
+### Security and safety
+- No root GUI, password storage, custom shell interpolation or unprompted package modifications.
+- Re-run the APT simulation immediately before privileged upgrade/autoremove; cancel if packages changed.
+- Block upgrades requiring removals, protected-package Autoremove, and previews over 25 changed packages.
+- Preserve APT locks, Ubuntu phased updates, configuration files and installed packages unless explicitly approved.
+- No full-upgrade, purge, PPA edits or Ubuntu release upgrade.
+
 ## [0.4.6] - 2026-10-22 (Development)
 
 ### Fixed (GitHub HTTP diagnostics)

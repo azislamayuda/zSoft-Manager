@@ -1,9 +1,47 @@
+# ==========================================
+# zSoft Manager - Git Ignore
+# ==========================================
+
+# Rust / Cargo
 /target/
-*.AppImage
-*.part
-*.bak
-*.log
-.idea/
-.vscode/
+*.rs.bk
+*.pdb
+
+# Build and distribution
 /build/
 /dist/
+/AppDir/
+*.AppImage
+*.AppImage.sha256
+*.zip
+
+# Python temporary files
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# IDE / Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Environment and sensitive files
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.local.json
+
+# Logs and temporary files
+*.log
+*.tmp
+*.bak
+*.orig
+
+# Operating systems
+.DS_Store
+Thumbs.db

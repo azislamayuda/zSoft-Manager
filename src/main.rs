@@ -1,5 +1,8 @@
+mod apt;
+mod apt_ui;
 mod check_summary;
 mod config;
+mod dashboard_ui;
 mod flatpak;
 mod flatpak_ui;
 mod info;
