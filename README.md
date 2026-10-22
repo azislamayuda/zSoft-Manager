@@ -198,4 +198,4 @@ Dashboard is now the first page and first navigation icon. Its five cards summar
 
 APT package totals are system packages, **not the number of graphical applications**. Unavailable CLI or invalid Python environments are shown as unavailable, never silently reported as zero. Dashboard counts are snapshots until refreshed; checks for available updates still belong in the individual manager pages.
 
-About and Changelog share one navigation page, with separate scrollable cards. The obsolete Back to applications button and Network detail row were removed. See `DASHBOARD-REFINE-v0.4.7-TEST-NOTES.md` for the current GUI verification steps.
+About and Changelog share one navigation page, with separate scrollable cards. The obsolete Back to applications button and Network detail row were removed. See `docs/development/DASHBOARD-REFINE-v0.4.7-TEST-NOTES.md` for the current GUI verification steps.
