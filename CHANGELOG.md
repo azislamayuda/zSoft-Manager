@@ -2,6 +2,24 @@
 
 All notable changes to this project are recorded here. Format follows Keep a Changelog.
 
+## [0.4.6] - 2026-10-22 (Development)
+
+### Fixed (GitHub HTTP diagnostics)
+- Show the actual GitHub HTTP status and API message instead of the generic `curl: (22)` error; distinguish rate limiting, access denial, missing repositories/releases, and transient server failures.
+- Stop further GitHub API requests within the current AppImage check when a rate limit is encountered; other providers remain unaffected.
+- Keep each full error accessible as a tooltip on the affected AppImage row. Failed checks never count as up to date.
+- Added offline regression tests for HTTP 200, 403, 404, 429 and 502 responses.
+
+### Improved
+- Added bottom-centred summary toasts after explicit **Check updates** for AppImage, Flatpak, Node.js and Python pages, including cases with zero updates.
+- AppImage result notifications now distinguish available updates, up-to-date files, unverified local versions and source errors; a configuration error also produces a toast.
+- Flatpak check summaries distinguish **application** and **runtime** update counts as well as up-to-date refs and check failures, irrespective of the visible tab.
+- Node.js check summaries count available NVM / LTS / Current / npm tool updates and global npm package updates separately. Partial check warnings are shown rather than claiming everything is current.
+- Python check summaries display the number of outdated top-level packages and installed top-level packages, or an error toast when the check fails.
+- Reused the shared toast and sequence-safe dismissal mechanism for all pages; normal local refreshes do not emit false update summaries.
+- Moved the Flatpak **Applications** and **Runtimes** buttons to the right of the **Flatpak Manager** title on the same row.
+- Added regression tests for summary text, error counts, Node update counts and Flatpak heading layout.
+
 ## [0.4.5] - 2026-10-21 (Development)
 
 ### Node.js cleanup (pre-release improvement)

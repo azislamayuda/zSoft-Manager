@@ -578,37 +578,25 @@ fn build_ui(app: &gtk::Application) {
         let python_loaded = python_loaded.clone();
         button.connect_clicked(move |_| {
             if page == Page::Flatpak && !flatpak_loaded.replace(true) {
-                let popup = flatpak_toast.clone();
-                let label = flatpak_label.clone();
-                let sequence = flatpak_sequence.clone();
-                let notice: Rc<dyn Fn(&str, bool)> = Rc::new(move |message, success| {
-                    popup.remove_css_class("toast-success");
-                    popup.remove_css_class("toast-info");
-                    popup.remove_css_class("toast-error");
-                    popup.add_css_class(if success {
-                        "toast-success"
-                    } else {
-                        "toast-error"
-                    });
-                    label.set_text(message);
-                    popup.set_reveal_child(true);
-                    let ticket = sequence.get().wrapping_add(1);
-                    sequence.set(ticket);
-                    let popup = popup.clone();
-                    let sequence = sequence.clone();
-                    glib::timeout_add_local_once(Duration::from_secs(5), move || {
-                        if sequence.get() == ticket {
-                            popup.set_reveal_child(false);
-                        }
-                    });
-                });
-                flatpak_page.append(&flatpak_ui::build(notice));
+                flatpak_page.append(&flatpak_ui::build(page_notice(
+                    &flatpak_toast,
+                    &flatpak_label,
+                    &flatpak_sequence,
+                )));
             }
             if page == Page::Node && !node_loaded.replace(true) {
-                node_page.append(&node_ui::build());
+                node_page.append(&node_ui::build(page_notice(
+                    &flatpak_toast,
+                    &flatpak_label,
+                    &flatpak_sequence,
+                )));
             }
             if page == Page::Python && !python_loaded.replace(true) {
-                python_page.append(&python_ui::build());
+                python_page.append(&python_ui::build(page_notice(
+                    &flatpak_toast,
+                    &flatpak_label,
+                    &flatpak_sequence,
+                )));
             }
             navigate(&nav, page);
         });
@@ -733,6 +721,39 @@ fn notify(model: &Rc<RefCell<Model>>, kind: Notice, message: &str) {
     });
 }
 
+// Pages use the same toast surface and sequence guard as the AppImage page.
+// A later toast must not be hidden by an earlier timeout.
+fn page_notice(
+    toast: &gtk::Revealer,
+    label: &gtk::Label,
+    sequence: &Rc<Cell<u64>>,
+) -> Rc<dyn Fn(&str, bool)> {
+    let popup = toast.clone();
+    let text = label.clone();
+    let sequence = sequence.clone();
+    Rc::new(move |message, success| {
+        for css in ["toast-success", "toast-info", "toast-error"] {
+            popup.remove_css_class(css);
+        }
+        popup.add_css_class(if success {
+            "toast-success"
+        } else {
+            "toast-error"
+        });
+        text.set_text(message);
+        popup.set_reveal_child(true);
+        let ticket = sequence.get().wrapping_add(1);
+        sequence.set(ticket);
+        let popup = popup.clone();
+        let sequence = sequence.clone();
+        glib::timeout_add_local_once(Duration::from_secs(5), move || {
+            if sequence.get() == ticket {
+                popup.set_reveal_child(false);
+            }
+        });
+    })
+}
+
 fn check_self_update(model: &Rc<RefCell<Model>>) {
     if model.borrow().busy {
         return;
@@ -754,7 +775,7 @@ fn check_self_update(model: &Rc<RefCell<Model>>) {
             refresh_list: false,
         });
     });
-    receive_events(model.clone(), rx);
+    receive_events(model.clone(), rx, false);
 }
 
 fn launch_self_update(model: &Rc<RefCell<Model>>, release: ReleaseInfo) {
@@ -784,7 +805,7 @@ fn launch_self_update(model: &Rc<RefCell<Model>>, release: ReleaseInfo) {
             refresh_list: false,
         });
     });
-    receive_events(model.clone(), rx);
+    receive_events(model.clone(), rx, false);
 }
 
 fn rescan(model: &Rc<RefCell<Model>>) {
@@ -1328,7 +1349,7 @@ fn confirm_local_version(model: &Rc<RefCell<Model>>, path: &PathBuf) {
                     refresh_list: false,
                 });
             });
-            receive_events(model.clone(), rx);
+            receive_events(model.clone(), rx, false);
         });
     }
     open_modal(model, &card);
@@ -1618,6 +1639,11 @@ fn check_updates(model: &Rc<RefCell<Model>>) {
                 .borrow()
                 .footer
                 .set_text(&format!("Config error: {e}"));
+            notify(
+                model,
+                Notice::Error,
+                &format!("AppImage update check failed: {e}"),
+            );
             return;
         }
     };
@@ -1656,9 +1682,25 @@ fn check_updates(model: &Rc<RefCell<Model>>) {
     notify(model, Notice::Info, "Checking application updates…");
     let (tx, rx) = mpsc::channel();
     thread::spawn(move || {
+        // Never hammer GitHub once its rate limit has been reached. KDE
+        // checks can still proceed because they use a different provider.
+        let mut github_limited = false;
         for (path, source, saved) in jobs {
             let result = match source {
-                Some(source) => update::check(&source, &path, saved.as_deref()),
+                Some(source) if github_limited && source.provider == SourceProvider::Github => Err(
+                    "GitHub API rate limit exceeded; check skipped until the limit resets".into(),
+                ),
+                Some(source) => {
+                    let result = update::check(&source, &path, saved.as_deref());
+                    if result
+                        .as_ref()
+                        .err()
+                        .is_some_and(|e| e.starts_with("GitHub API rate limit exceeded"))
+                    {
+                        github_limited = true;
+                    }
+                    result
+                }
                 None => Err("Update source not configured; click Source".into()),
             };
             if tx.send(Event::Checked(path, result)).is_err() {
@@ -1669,7 +1711,7 @@ fn check_updates(model: &Rc<RefCell<Model>>) {
             refresh_list: false,
         });
     });
-    receive_events(model.clone(), rx);
+    receive_events(model.clone(), rx, true);
 }
 
 fn launch_update(model: &Rc<RefCell<Model>>, jobs: Vec<(PathBuf, ReleaseInfo)>) {
@@ -1701,16 +1743,18 @@ fn launch_update(model: &Rc<RefCell<Model>>, jobs: Vec<(PathBuf, ReleaseInfo)>) 
         }
         let _ = tx.send(Event::Done { refresh_list: true });
     });
-    receive_events(model.clone(), rx);
+    receive_events(model.clone(), rx, false);
 }
 
-fn receive_events(model: Rc<RefCell<Model>>, rx: mpsc::Receiver<Event>) {
+fn receive_events(model: Rc<RefCell<Model>>, rx: mpsc::Receiver<Event>, report_check: bool) {
     // Timer is active only during a user-triggered network or download operation.
     // There is no idle polling and no background daemon.
     let mut update_errors: Vec<String> = Vec::new();
     let mut update_successes = 0usize;
     let mut check_available = 0usize;
     let mut check_failed = 0usize;
+    let mut check_current = 0usize;
+    let mut check_uncertain = 0usize;
     let mut self_result: Option<Result<String, String>> = None;
     let mut pending_self_check: Option<String> = None;
     let mut local_version_recorded = false;
@@ -1722,8 +1766,12 @@ fn receive_events(model: Rc<RefCell<Model>>, rx: mpsc::Receiver<Event>) {
                     if let Some(e) = m.entries.iter_mut().find(|e| e.path == path) {
                         match result {
                             Ok((info, state)) => {
-                                if state == CheckState::Available {
-                                    check_available += 1;
+                                match state {
+                                    CheckState::Available => check_available += 1,
+                                    CheckState::UpToDate | CheckState::UserConfirmed => {
+                                        check_current += 1
+                                    }
+                                    CheckState::Uncertain => check_uncertain += 1,
                                 }
                                 let digest = if info.sha256.is_some() {
                                     "SHA256 available"
@@ -1743,6 +1791,7 @@ fn receive_events(model: Rc<RefCell<Model>>, rx: mpsc::Receiver<Event>) {
                             }
                             Err(reason) => {
                                 check_failed += 1;
+                                e.status.set_tooltip_text(Some(&reason));
                                 e.status.set_text(&reason);
                             }
                         }
@@ -1863,8 +1912,15 @@ fn receive_events(model: Rc<RefCell<Model>>, rx: mpsc::Receiver<Event>) {
                     } else if local_version_recorded {
                         "Local installed version recorded. No AppImage was downloaded or replaced."
                             .to_owned()
+                    } else if report_check {
+                        crate::check_summary::appimage(
+                            check_available,
+                            check_current,
+                            check_uncertain,
+                            check_failed,
+                        )
                     } else if !refresh_list {
-                        "Check complete. You can update or set a stable filename.".to_owned()
+                        "Operation complete.".to_owned()
                     } else if update_errors.is_empty() {
                         format!("{update_successes} updates installed. List refreshed; check again for current status.")
                     } else {
@@ -1902,8 +1958,21 @@ fn receive_events(model: Rc<RefCell<Model>>, rx: mpsc::Receiver<Event>) {
                             },
                             &text,
                         );
-                    } else if check_available > 0 || check_failed > 0 {
-                        notify(&model, Notice::Info, &format!("Check finished: {check_available} updates available, {check_failed} sources unavailable"));
+                    } else if report_check {
+                        let text = crate::check_summary::appimage(
+                            check_available,
+                            check_current,
+                            check_uncertain,
+                            check_failed,
+                        );
+                        let kind = if check_failed > 0 {
+                            Notice::Error
+                        } else if check_available > 0 {
+                            Notice::Info
+                        } else {
+                            Notice::Success
+                        };
+                        notify(&model, kind, &text);
                     }
                     update_control_state(&model);
                     return glib::ControlFlow::Break;

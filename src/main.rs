@@ -1,3 +1,4 @@
+mod check_summary;
 mod config;
 mod flatpak;
 mod flatpak_ui;

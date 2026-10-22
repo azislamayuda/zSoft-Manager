@@ -1,10 +1,14 @@
 //! Native GTK4 page for an explicitly activated Python venv. Activation applies
 //! only to this app's operations, not to an already-open terminal shell.
-use crate::python_env::{self, LocalInfo, PackageUpdate};
+use crate::{
+    check_summary,
+    python_env::{self, LocalInfo, PackageUpdate},
+};
 use gtk::{glib, prelude::*};
 use std::{cell::RefCell, path::PathBuf, rc::Rc, sync::mpsc, thread, time::Duration};
 
 struct Ui {
+    notice: Rc<dyn Fn(&str, bool)>,
     path: gtk::Entry,
     activation: gtk::Button,
     refresh: gtk::Button,
@@ -58,7 +62,7 @@ fn set_action_text(button: &gtk::Button, text: &str) {
     }
 }
 
-pub fn build() -> gtk::Box {
+pub fn build(notice: Rc<dyn Fn(&str, bool)>) -> gtk::Box {
     let page = gtk::Box::new(gtk::Orientation::Vertical, 13);
     page.add_css_class("page");
 
@@ -128,6 +132,7 @@ pub fn build() -> gtk::Box {
     );
 
     let ui = Rc::new(RefCell::new(Ui {
+        notice,
         path: path.clone(),
         activation: activation.clone(),
         refresh: refresh.clone(),
@@ -381,15 +386,24 @@ fn inspect(ui: &Rc<RefCell<Ui>>, remote: bool) {
                                 "Environment ready, but settings could not be saved: {error}"
                             ));
                         }
-                        drop(model);
                         if let Some(updates) = updates {
+                            (model.notice)(
+                                &check_summary::python(updates.len(), info.top_level_count),
+                                true,
+                            );
+                            drop(model);
                             draw_updates(&ui, updates);
+                        } else {
+                            drop(model);
                         }
                     }
                     Err(error) => {
                         model
                             .status
                             .set_text(&format!("Python check failed: {error}"));
+                        if remote {
+                            (model.notice)(&format!("Python update check failed: {error}"), false);
+                        }
                         if !remote {
                             model.active = false;
                             model.folder = None;
@@ -406,9 +420,14 @@ fn inspect(ui: &Rc<RefCell<Ui>>, remote: bool) {
             Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
             Err(mpsc::TryRecvError::Disconnected) => {
                 ui.borrow_mut().busy = false;
-                ui.borrow()
+                let model = ui.borrow();
+                model
                     .status
                     .set_text("Python check failed: worker disconnected");
+                if remote {
+                    (model.notice)("Python update check failed: worker disconnected.", false);
+                }
+                drop(model);
                 refresh_controls(&ui);
                 glib::ControlFlow::Break
             }

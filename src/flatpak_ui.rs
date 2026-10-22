@@ -1,5 +1,8 @@
 //! GTK4 Flatpak page. Instantiated lazily; all subprocess work runs off the main thread.
-use crate::flatpak::{self, Item, Kind, Status};
+use crate::{
+    check_summary,
+    flatpak::{self, Item, Kind, Status},
+};
 use gtk::{glib, prelude::*};
 use std::{cell::RefCell, rc::Rc, sync::mpsc, thread, time::Duration};
 
@@ -49,10 +52,14 @@ fn label(text: &str, style: &str) -> gtk::Label {
 pub fn build(notice: Rc<dyn Fn(&str, bool)>) -> gtk::Box {
     let page = gtk::Box::new(gtk::Orientation::Vertical, 14);
     page.add_css_class("page");
-    page.append(&label("Flatpak Manager", "page-heading"));
-    page.append(&label("Manage installed Flatpak applications and runtimes from their configured remotes. Updates run only on request.","pathline"));
-
+    // Keep the view selector on the same title row, aligned to the right.
+    let header = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+    let heading = label("Flatpak Manager", "page-heading");
+    heading.set_hexpand(true);
+    header.append(&heading);
     let tabs = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    tabs.set_valign(gtk::Align::Center);
+    tabs.set_halign(gtk::Align::End);
     let app_tab = action(
         "Applications",
         "application-x-executable-symbolic",
@@ -61,7 +68,9 @@ pub fn build(notice: Rc<dyn Fn(&str, bool)>) -> gtk::Box {
     let runtime_tab = action("Runtimes", "package-x-generic-symbolic", "flat-button");
     tabs.append(&app_tab);
     tabs.append(&runtime_tab);
-    page.append(&tabs);
+    header.append(&tabs);
+    page.append(&header);
+    page.append(&label("Manage installed Flatpak applications and runtimes from their configured remotes. Updates run only on request.","pathline"));
 
     let actions = gtk::Box::new(gtk::Orientation::Horizontal, 8);
     actions.set_halign(gtk::Align::Start);
@@ -349,20 +358,46 @@ fn poll(view: &Rc<RefCell<View>>, rx: mpsc::Receiver<ScanMessage>) {
                 v.busy = false;
                 match result {
                     Ok(items) => {
-                        (v.notice)(
-                            if remote {
-                                "Flatpak update check completed"
-                            } else {
-                                "Flatpak list refreshed"
-                            },
-                            true,
-                        );
+                        if remote {
+                            let app_updates = items
+                                .iter()
+                                .filter(|i| i.kind == Kind::App && i.status == Status::Available)
+                                .count();
+                            let runtime_updates = items
+                                .iter()
+                                .filter(|i| {
+                                    i.kind == Kind::Runtime && i.status == Status::Available
+                                })
+                                .count();
+                            let current = items
+                                .iter()
+                                .filter(|i| i.status == Status::UpToDate)
+                                .count();
+                            let failed = items
+                                .iter()
+                                .filter(|i| {
+                                    i.status == Status::CheckFailed
+                                        || i.status == Status::NotChecked
+                                })
+                                .count();
+                            (v.notice)(
+                                &check_summary::flatpak(
+                                    app_updates,
+                                    runtime_updates,
+                                    current,
+                                    failed,
+                                ),
+                                failed == 0,
+                            );
+                        }
                         v.checked = remote;
                         v.items = items;
                         v.status.set_text(if remote {"Update check completed. Only reported Flatpak ref updates are offered."} else {"Installed Flatpaks loaded. Click Check updates to query configured remotes."});
                     }
                     Err(error) => {
-                        (v.notice)("Flatpak scan failed", false);
+                        if remote {
+                            (v.notice)(&format!("Flatpak check failed: {error}"), false);
+                        }
                         v.status.set_text(&format!("Flatpak scan failed: {error}"));
                     }
                 }
@@ -412,9 +447,11 @@ fn poll(view: &Rc<RefCell<View>>, rx: mpsc::Receiver<ScanMessage>) {
         Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
         Err(mpsc::TryRecvError::Disconnected) => {
             view.borrow_mut().busy = false;
-            view.borrow()
-                .status
+            let v = view.borrow();
+            v.status
                 .set_text("Flatpak worker disconnected before reporting results.");
+            (v.notice)("Flatpak check failed: worker disconnected.", false);
+            drop(v);
             controls(&view);
             glib::ControlFlow::Break
         }
@@ -499,6 +536,13 @@ fn update(view: &Rc<RefCell<View>>, all: bool) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn flatpak_tabs_are_in_the_title_row() {
+        let source = include_str!("flatpak_ui.rs");
+        assert!(source.contains("header.append(&tabs);"));
+        assert!(source.contains("heading.set_hexpand(true);"));
+        assert!(source.contains("tabs.set_halign(gtk::Align::End);"));
+    }
     #[test]
     fn new_flatpak_page_has_separate_runtime_and_app_views() {
         let source = include_str!("flatpak_ui.rs");

@@ -1,4 +1,4 @@
-# zSoft Manager v0.4.5 — Development, Testing & Release
+# zSoft Manager v0.4.6 — Development, Testing & Release
 
 This development snapshot adds Flatpak management on top of the verified v0.4.4 AppImage/Node/Python code. **Do not publish until Rust tests and GUI smoke tests pass on Ubuntu.**
 
@@ -6,9 +6,9 @@ This development snapshot adds Flatpak management on top of the verified v0.4.4 
 
 ```bash
 cd "$HOME/ZDATA/ME/GITHUB/zSoft-Manager"
-unzip -o ~/Downloads/zSoft-Manager-v0.4.5-PATCH.zip -d .
+unzip -o ~/Downloads/zSoft-Manager-v0.4.6-PATCH.zip -d .
 cargo fmt
-bash scripts/audit-v045.sh
+bash scripts/audit-v046.sh
 cargo run --release
 ```
 
@@ -29,13 +29,17 @@ flatpak remote-ls --app --updates
 ```bash
 bash scripts/test-and-build.sh
 cd dist
-sha256sum -c zSoft-Manager-v0.4.5-x86_64.AppImage.sha256
-./zSoft-Manager-v0.4.5-x86_64.AppImage
+sha256sum -c zSoft-Manager-v0.4.6-x86_64.AppImage.sha256
+./zSoft-Manager-v0.4.6-x86_64.AppImage
 ```
 
 Expected release assets:
 
-- `dist/zSoft-Manager-v0.4.5-x86_64.AppImage`
-- `dist/zSoft-Manager-v0.4.5-x86_64.AppImage.sha256`
+- `dist/zSoft-Manager-v0.4.6-x86_64.AppImage`
+- `dist/zSoft-Manager-v0.4.6-x86_64.AppImage.sha256`
 
-Commit/push through GitHub Desktop. Publish GitHub tag `v0.4.5` only after the packaged AppImage works.
+Commit/push through GitHub Desktop. Publish GitHub tag `v0.4.6` only after the packaged AppImage works.
+
+## v0.4.6 UI checks before packaging
+
+Click **Check updates** separately in the AppImage, Flatpak, Node.js and Python pages. Confirm the toast counts agree with the visible result lists; check a zero-update case, and a controlled failure case if possible. Check both Flatpak tabs and verify Applications / Runtimes stay next to the title. Update execution still requires explicit user input.

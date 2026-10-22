@@ -2,7 +2,7 @@
 
 **zSoft Manager** is a lightweight, native Rust + GTK4 application manager for Ubuntu and related Linux distributions, created by [@azislamayuda](https://github.com/azislamayuda).
 
-**Current development version: v0.4.5** — AppImage, Flatpak, NVM-managed Node.js, and Python virtual environment updates. Network checks run only on request.
+**Current development version: v0.4.6** — AppImage, Flatpak, NVM-managed Node.js, and Python virtual environment updates. Network checks run only on request.
 
 > The app manages **AppImage**, **Flatpak** (applications and runtimes), **NVM-managed Node.js**, and **Python virtual environment** packages. `.deb` and Snap package management are not implemented.
 
@@ -98,7 +98,7 @@ bash scripts/build-appimage.sh
 
 On x86_64 Ubuntu, the script downloads an official linuxdeploy binary if not already cached, assembles GTK4-linked components into an AppDir and writes the AppImage + SHA256 file to `dist/`. Runtime portability must still be smoke-tested on the target Ubuntu versions. It is also possible to create a release via the GitHub Actions workflow by pushing a tag, after building and testing locally.
 
-Use GitHub Desktop for **Commit to main** and **Push origin**. After tests succeed, create the tag `v0.4.5` from GitHub's new-release page, rather than using Git CLI.
+Use GitHub Desktop for **Commit to main** and **Push origin**. After tests succeed, create the tag `v0.4.6` from GitHub's new-release page, rather than using Git CLI.
 
 The GitHub Actions `release-appimage.yml` job will test, build, package, and upload the AppImage to GitHub Releases. A Release is required before the self-updater works; an empty repository is not a Release.
 
@@ -108,7 +108,7 @@ The development repository is expected at `/home/lamayuda/ZDATA/ME/GITHUB/zSoft-
 
 ## Previous zAppImage Manager migration
 
-If you already cloned `zSoft-Manager` via GitHub Desktop, **do not run the old migration script again**. Extract the v0.4.5 PATCH into your existing clone. Do not overwrite `.git`. Local Git operations are performed with GitHub Desktop, not the command line.
+If you already cloned `zSoft-Manager` via GitHub Desktop, **do not run the old migration script again**. Extract the v0.4.6 PATCH into your existing clone. Do not overwrite `.git`. Local Git operations are performed with GitHub Desktop, not the command line.
 
 Source configuration reads existing `~/.config/zappimage-manager/sources.json` and state `~/.local/state/zappimage-manager/installed.json` as a fallback, and saves future changes under `zsoft-manager`. Old files remain untouched and existing rollback backups are preserved.
 
@@ -162,6 +162,15 @@ Before packaging: `bash scripts/audit-v044.sh`, then `cargo run --release`. Test
 ### Matching manually installed versionless AppImages (v0.4.4)
 
 On-demand GitHub update checks compare publisher SHA256 digests **and** published `.AppImage.sha256` sidecars to the bytes in a local renamed AppImage. When they match, status is **Up to date**, with no reinstall. If a checksum is unavailable or does not match, zSoft Manager will not guess: use **Set local version** after checking the version in the installed application's About window. Such an assertion is recorded against the exact local file SHA256 and repository; a replaced AppImage or changed repository invalidates it. Its status is marked **User-confirmed** rather than publisher-verified. Once current, the row displays a disabled **Up to date** check action; **Edit local version** is available from **Source** if a user-confirmation was saved and the release has been checked. If an older version is recorded, **Install update** remains available. No automatic background checks, reinstalls or downloads occur.
+
+## Unified check-update notifications (v0.4.6)
+
+- On every explicit **Check updates**, AppImage, Flatpak, Node.js and Python pages show a bottom-centred toast with their update counts. The shared toast uses sequence-safe auto-dismiss so a previous timeout cannot hide a new message.
+- Flatpak summaries separately count application and runtime updates, current refs, and remote check errors, regardless of the currently selected tab. These counts come from Flatpak ref update status, **not** version-string guesses.
+- Node.js summaries count available NVM/Node LTS/Current/npm updates and global npm packages separately, reporting warnings for partial checks.
+- Python summaries show top-level outdated packages and installed top-level package count; an inactive Python environment is not treated as checked.
+- AppImage summaries include confirmed updates, up-to-date items, unverified local versions, and source errors. Empty results still produce a toast.
+- **Flatpak Applications / Runtimes** tabs now sit on the same row as the Flatpak Manager heading, aligned right.
 
 ## Flatpak Manager (v0.4.5)
 

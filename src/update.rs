@@ -788,10 +788,66 @@ fn download_sha256_sidecar(url: &str, expected_filename: &str) -> Result<String,
         .ok_or_else(|| "The published SHA256 asset has invalid content".into())
 }
 
+// curl writes the final HTTP status after the JSON body, so errors are never
+// reduced to an unexplained `curl: (22)` failure. No credentials are logged.
+const GITHUB_HTTP_MARKER: &[u8] = b"\n__ZSOFT_GITHUB_HTTP__=";
+
+fn split_github_http_response(raw: &[u8]) -> Result<(u16, &[u8]), String> {
+    let pos = raw
+        .windows(GITHUB_HTTP_MARKER.len())
+        .rposition(|part| part == GITHUB_HTTP_MARKER)
+        .ok_or("Missing GitHub HTTP status from curl")?;
+    let status = std::str::from_utf8(&raw[pos + GITHUB_HTTP_MARKER.len()..])
+        .map_err(|_| "Invalid GitHub HTTP status encoding")?
+        .trim()
+        .parse::<u16>()
+        .map_err(|_| "Invalid GitHub HTTP status")?;
+    Ok((status, &raw[..pos]))
+}
+
+fn github_http_error(status: u16, body: &[u8]) -> String {
+    let message = serde_json::from_slice::<serde_json::Value>(body)
+        .ok()
+        .and_then(|data| {
+            data.get("message")
+                .and_then(|value| value.as_str())
+                .map(str::to_owned)
+        })
+        .unwrap_or_default();
+    // Do not place entire server-controlled error bodies in the GTK label.
+    let detail: String = message
+        .lines()
+        .next()
+        .unwrap_or("")
+        .chars()
+        .take(180)
+        .collect();
+    let lower = detail.to_ascii_lowercase();
+    let rate_limited = status == 429
+        || (status == 403 && (lower.contains("rate limit") || lower.contains("rate_limit")));
+    let category = if rate_limited {
+        "GitHub API rate limit exceeded"
+    } else {
+        match status {
+            401 => "GitHub API authentication rejected",
+            403 => "GitHub API access denied",
+            404 => "GitHub repository or release not found",
+            500..=599 => "GitHub API temporarily unavailable",
+            _ => "GitHub API HTTP error",
+        }
+    };
+    if rate_limited {
+        return format!("{category} (HTTP {status}). Wait for the GitHub limit to reset before checking again. {detail}").trim().to_owned();
+    }
+    format!("{category} (HTTP {status}). {detail}")
+        .trim()
+        .to_owned()
+}
+
 fn fetch_github_json<T: DeserializeOwned>(api: &str, max_bytes: &str) -> Result<T, String> {
     let output = Command::new("curl")
         .args([
-            "--fail",
+            "--fail-with-body",
             "--silent",
             "--show-error",
             "--location",
@@ -810,25 +866,37 @@ fn fetch_github_json<T: DeserializeOwned>(api: &str, max_bytes: &str) -> Result<
             "--header",
             "Accept: application/vnd.github+json",
             "--header",
-            "Cache-Control: no-cache",
-            "--header",
-            "User-Agent: zSoft-Manager/0.4.4",
+            "User-Agent: zSoft-Manager/0.4.6",
+            "--write-out",
+            "\\n__ZSOFT_GITHUB_HTTP__=%{http_code}\\n",
         ])
         .arg(api)
         .output()
         .map_err(|e| format!("Cannot run curl: {e}"))?;
-    if !output.status.success() {
-        let detail = String::from_utf8_lossy(&output.stderr);
+    // curl --write-out uses backslash escapes. The HTTP status is printed even
+    // when --fail-with-body returns exit 22 on a 4xx/5xx response.
+    if !output.status.success() && output.status.code() != Some(22) {
         let kind = match output.status.code() {
             Some(6 | 7 | 28 | 35 | 60) => "Network error",
-            Some(22) => "GitHub API HTTP error (check repository, rate limit or permissions)",
             Some(63) => "GitHub API response exceeds the safety size limit",
             _ => "GitHub API request error",
         };
-        return Err(format!("{kind}: {}", detail.trim()));
+        return Err(format!(
+            "{kind}: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
     }
-    serde_json::from_slice(&output.stdout)
-        .map_err(|e| format!("Invalid GitHub release response: {e}"))
+    let (status, body) = split_github_http_response(&output.stdout)?;
+    if !(200..300).contains(&status) {
+        return Err(github_http_error(status, body));
+    }
+    if !output.status.success() {
+        return Err(format!(
+            "GitHub API response could not be received: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    serde_json::from_slice(body).map_err(|e| format!("Invalid GitHub release response: {e}"))
 }
 
 fn github_asset_response(
@@ -1486,6 +1554,28 @@ mod tests {
         assert_eq!(assets[0].1, "kdenlive-26.08.11-x86_64.AppImage");
         assert_eq!(assets.len(), 3);
     }
+    #[test]
+    fn github_http_status_is_parsed_without_corrupting_json() {
+        let raw = b"{\"tag_name\":\"v1\",\"assets\":[]}\n__ZSOFT_GITHUB_HTTP__=200\n";
+        let (status, body) = split_github_http_response(raw).unwrap();
+        assert_eq!(status, 200);
+        assert_eq!(body, br#"{"tag_name":"v1","assets":[]}"#);
+        assert!(split_github_http_response(b"no status").is_err());
+    }
+
+    #[test]
+    fn github_http_errors_distinguish_rate_limit_permissions_and_missing_repo() {
+        let limit = github_http_error(403, br#"{"message":"API rate limit exceeded for test"}"#);
+        assert!(limit.starts_with("GitHub API rate limit exceeded"));
+        assert!(github_http_error(429, b"{}").starts_with("GitHub API rate limit exceeded"));
+        assert!(github_http_error(404, br#"{"message":"Not Found"}"#).contains("not found"));
+        assert!(
+            github_http_error(403, br#"{"message":"Resource not accessible"}"#)
+                .contains("access denied")
+        );
+        assert!(github_http_error(502, b"{}").contains("temporarily unavailable"));
+    }
+
     #[test]
     fn final_size_requires_last_successful_http_response() {
         let h = "HTTP/1.1 302 Found\r\nContent-Length: 3\r\n\r\nHTTP/2 200\r\ncontent-length: 214748365\r\n\r\n";

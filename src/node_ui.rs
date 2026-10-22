@@ -1,6 +1,9 @@
 //! Native GTK4 Node.js management page. No extra window or background daemon.
 //! Only the Check updates button accesses remote services.
-use crate::node::{self, Install, NodePhase, Versions};
+use crate::{
+    check_summary,
+    node::{self, Install, NodePhase, Versions},
+};
 use gtk::{glib, prelude::*};
 use std::{cell::RefCell, rc::Rc, sync::mpsc, thread, time::Duration};
 
@@ -11,6 +14,7 @@ struct ToolRow {
     action: gtk::Button,
 }
 struct Ui {
+    notice: Rc<dyn Fn(&str, bool)>,
     status: gtk::Label,
     active: gtk::Label,
     phase: gtk::Label,
@@ -94,7 +98,7 @@ fn plain_text(text: &str, css: &str) -> gtk::Label {
     label.add_css_class(css);
     label
 }
-pub fn build() -> gtk::Box {
+pub fn build(notice: Rc<dyn Fn(&str, bool)>) -> gtk::Box {
     let page = gtk::Box::new(gtk::Orientation::Vertical, 14);
     page.add_css_class("page");
     let header = gtk::Box::new(gtk::Orientation::Horizontal, 12);
@@ -166,6 +170,7 @@ pub fn build() -> gtk::Box {
     page.append(&status);
 
     let model = Rc::new(RefCell::new(Ui {
+        notice,
         status,
         active,
         phase,
@@ -421,6 +426,24 @@ fn update(model: &Rc<RefCell<Ui>>, redraw_lists: bool) {
     }
 }
 
+// Only the explicit remote check produces a summary toast. A local refresh is silent.
+fn node_check_counts(v: &Versions) -> (usize, usize) {
+    let tools = [
+        (v.nvm.as_deref(), v.nvm_latest.as_deref()),
+        (v.lts.as_deref(), v.lts_latest.as_deref()),
+        (v.current.as_deref(), v.current_latest.as_deref()),
+        (v.npm.as_deref(), v.npm_latest.as_deref()),
+    ]
+    .into_iter()
+    .filter(|(local, latest)| node::newer(*local, *latest))
+    .count();
+    let packages = v
+        .global_packages
+        .iter()
+        .filter(|p| p.name != "npm" && p.latest.is_some())
+        .count();
+    (tools, packages)
+}
 fn probe(model: &Rc<RefCell<Ui>>, remote: bool) {
     if model.borrow().busy {
         return;
@@ -447,6 +470,14 @@ fn probe(model: &Rc<RefCell<Ui>>, remote: bool) {
             let redraw_lists = result.is_ok();
             match result {
                 Ok(snapshot) => {
+                    if remote {
+                        let (tools, packages) = node_check_counts(&snapshot);
+                        let warnings = snapshot.warnings.len();
+                        (m.notice)(
+                            &check_summary::node(tools, packages, warnings),
+                            warnings == 0,
+                        );
+                    }
                     let warning = snapshot.warnings.join(" · ");
                     m.versions = snapshot;
                     m.status.set_text(if warning.is_empty() {
@@ -454,7 +485,12 @@ fn probe(model: &Rc<RefCell<Ui>>, remote: bool) {
                             else { "Installed versions refreshed. Click Check updates for online information." }
                         } else { &warning });
                 }
-                Err(e) => m.status.set_text(&format!("Check failed: {e}")),
+                Err(e) => {
+                    m.status.set_text(&format!("Check failed: {e}"));
+                    if remote {
+                        (m.notice)(&format!("Node.js update check failed: {e}"), false);
+                    }
+                }
             }
             drop(m);
             update(&model, redraw_lists);
@@ -463,14 +499,38 @@ fn probe(model: &Rc<RefCell<Ui>>, remote: bool) {
         Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
         Err(mpsc::TryRecvError::Disconnected) => {
             model.borrow_mut().busy = false;
-            model
-                .borrow()
-                .status
-                .set_text("Check failed: worker disconnected");
+            let m = model.borrow();
+            m.status.set_text("Check failed: worker disconnected");
+            if remote {
+                (m.notice)("Node.js update check failed: worker disconnected.", false);
+            }
+            drop(m);
             update(&model, false);
             glib::ControlFlow::Break
         }
     });
+}
+
+#[cfg(test)]
+mod summary_tests {
+    use super::*;
+    #[test]
+    fn node_summary_counts_tools_and_global_packages_independently() {
+        let mut v = Versions::default();
+        v.lts = Some("v24.22.1".into());
+        v.lts_latest = Some("v24.22.2".into());
+        v.global_packages.push(node::GlobalPackage {
+            name: "typescript".into(),
+            installed: "5.0".into(),
+            latest: Some("5.1".into()),
+        });
+        v.global_packages.push(node::GlobalPackage {
+            name: "npm".into(),
+            installed: "11.0".into(),
+            latest: Some("11.1".into()),
+        });
+        assert_eq!(node_check_counts(&v), (1, 1));
+    }
 }
 
 // Surface NVM failures immediately. The status label at the bottom of the
